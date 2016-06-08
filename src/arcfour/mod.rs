@@ -1,5 +1,4 @@
-use std::io::Read;
-use std::io::Result;
+use std::io::{Read, Write, Result};
 
 pub struct Arcfour {
     s: [u8; 256],
@@ -9,6 +8,11 @@ pub struct Arcfour {
 
 pub struct ArcfourReader<R> {
     inner: R,
+    prng: Arcfour,
+}
+
+pub struct ArcfourWriter<W> {
+    inner: W,
     prng: Arcfour,
 }
 
@@ -80,5 +84,33 @@ impl<R:Read> Read for ArcfourReader<R> {
             }
             Err(err) => return Err(err)
         }
+    }
+}
+
+impl<W> ArcfourWriter<W> {
+    pub fn new(inner: W, key: &[u8]) -> ArcfourWriter<W> {
+        return ArcfourWriter {
+            inner: inner,
+            prng: Arcfour::new(key)
+        };
+    }
+}
+
+impl<W:Write> Write for ArcfourWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        let mut wsize : usize = 0;
+        for elem in buf {
+            match self.inner.write(&[*elem ^ self.prng.generate()]) {
+                Ok(n) => {
+                    if n == 0 { return Ok(wsize); }
+                    wsize += n;
+                }
+                Err(e) => { return Err(e); }
+            }
+        }
+        return Ok(wsize);
+    }
+    fn flush(&mut self) -> Result<()> {
+        return self.inner.flush();
     }
 }
