@@ -1,3 +1,8 @@
+// Copyright (c) 2016 Masaki Hara
+//
+// This software is released under the MIT License.
+// http://opensource.org/licenses/mit-license.php
+
 extern crate crypt_impl;
 
 use std::env;
