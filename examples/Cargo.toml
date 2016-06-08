@@ -1,0 +1,7 @@
+[package]
+name = "crypt-impl-examples"
+version = "0.1.0"
+authors = ["Masaki Hara <ackie.h.gmai@gmail.com>"]
+
+[dependencies]
+crypt-impl = { path = ".." }
