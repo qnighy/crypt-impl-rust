@@ -4,6 +4,7 @@
 // http://opensource.org/licenses/mit-license.php
 
 pub mod md5;
+pub mod sha1;
 pub mod arcfour;
 
 #[cfg(test)]
