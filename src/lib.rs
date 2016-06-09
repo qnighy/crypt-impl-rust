@@ -3,6 +3,7 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
+pub mod md5;
 pub mod arcfour;
 
 #[cfg(test)]
