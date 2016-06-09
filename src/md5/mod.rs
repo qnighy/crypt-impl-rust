@@ -131,7 +131,7 @@ impl Write for MD5Writer {
             self.buf[self.bufpos .. self.bufpos + wrsize]
                 .clone_from_slice(&buf[0 .. wrsize]);
             buf = &buf[wrsize ..];
-            self.position += (wrsize * 8) as u64;
+            self.position = self.position.wrapping_add((wrsize * 8) as u64);
             self.bufpos += wrsize;
             if self.bufpos >= self.buf.len() {
                 update(&mut self.state, &self.buf);
