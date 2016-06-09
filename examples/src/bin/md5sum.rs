@@ -11,10 +11,10 @@ use crypt_impl::md5::MD5Writer;
 fn main() {
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
-    let mut md5w = MD5Writer::new();
-    match io::copy(&mut stdin, &mut md5w) {
+    let mut writer = MD5Writer::new();
+    match io::copy(&mut stdin, &mut writer) {
         Ok(_) => {
-            let sum = md5w.sum();
+            let sum = writer.sum();
             for b in sum.iter() {
                 print!("{:02x}", b);
             }
