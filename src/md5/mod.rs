@@ -34,7 +34,7 @@ const K : [u32; 64] = [
     0xF7537E82, 0xBD3AF235, 0x2AD7D2BB, 0xEB86D391,
 ];
 
-fn update(hh: &mut [u32; 4], chunk: &[u8]) {
+fn update(hh: &mut [u32; 4], chunk: &[u8; 64]) {
     let mut m : [u32; 16] = [0; 16];
     for i in 0..16 {
         m[i] = LittleEndian::read_u32(&chunk[i * 4 .. i * 4 + 4]);
