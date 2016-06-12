@@ -73,9 +73,9 @@ impl DES {
 impl TDES {
     pub fn new(key: &[u8]) -> TDES {
         return TDES {
-            des1: DES::new(key[0..8]),
-            des2: DES::new(key[8..16]),
-            des3: DES::new(key[16..24]),
+            des1: DES::new(&key[0..8]),
+            des2: DES::new(&key[8..16]),
+            des3: DES::new(&key[16..24]),
         };
     }
     pub fn encrypt(&self, block: &mut [u8]) {
