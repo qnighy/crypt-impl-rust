@@ -8,6 +8,7 @@ pub mod sha1;
 pub mod sha2;
 pub mod sha3;
 pub mod arcfour;
+pub mod des;
 
 #[cfg(test)]
 mod tests {
@@ -27,5 +28,16 @@ mod tests {
             },
             Err(_) => assert!(false)
         }
+    }
+
+    #[test]
+    fn test_des() {
+        use des::DES;
+        let des = DES::new(&[0x10, 0x31, 0x6E, 0x02, 0x8C, 0x8F, 0x3B, 0x4A]);
+        let mut text = [0, 0, 0, 0, 0, 0, 0, 0];
+        des.encrypt(&mut text);
+        assert!(text == [0x82, 0xDC, 0xBA, 0xFB, 0xDE, 0xAB, 0x66, 0x02]);
+        des.decrypt(&mut text);
+        assert!(text == [0, 0, 0, 0, 0, 0, 0, 0]);
     }
 }
