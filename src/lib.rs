@@ -10,6 +10,7 @@ pub mod sha3;
 pub mod arcfour;
 pub mod des;
 pub mod aes;
+pub mod tls;
 
 #[cfg(test)]
 mod tests {
