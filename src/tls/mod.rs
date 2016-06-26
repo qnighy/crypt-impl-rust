@@ -48,8 +48,8 @@ impl<S: Read + Write> TLSStream<S> {
         return ret;
     }
     fn send_alert(&mut self, alert: Alert) -> io::Result<()> {
-        try!(alert.write_to(&mut self.write_bufs[ALERT_IDX]));
-        try!(self.flush(ALERT_IDX));
+        try!(alert.write_to(&mut self.write_bufs[ContentType::Alert.idx()]));
+        try!(self.flush(ContentType::Alert.idx()));
         try!(self.flush_record());
         return Ok(());
     }
@@ -77,8 +77,9 @@ impl<S: Read + Write> TLSStream<S> {
                 ]),
             ],
         };
-        try!(client_hello.write_to(&mut self.write_bufs[HANDSHAKE_IDX]));
-        try!(self.flush(HANDSHAKE_IDX));
+        try!(client_hello.write_to(
+            &mut self.write_bufs[ContentType::Handshake.idx()]));
+        try!(self.flush(ContentType::Handshake.idx()));
         try!(self.flush_record());
         return Ok(());
     }
@@ -105,7 +106,7 @@ impl<S: Read + Write> TLSStream<S> {
             // TODO: it's just plaintext!
             let len = cmp::min(maxlen - pos, MAX_CHUNK_LEN);
             self.record_write_buf.extend_from_slice(&[
-                CONTENT_TYPES[content_idx],
+                ContentType::from_idx(content_idx).id(),
                 0x03, 0x03, (len >> 8) as u8, len as u8,
             ]);
             self.record_write_buf.extend(vec[pos .. pos + len].iter());
@@ -189,7 +190,7 @@ impl<S: Read + Write> TLSStream<S> {
         loop {
             let message : HandshakeMessage;
             {
-                let cursor = &mut self.read_bufs[HANDSHAKE_IDX];
+                let cursor = &mut self.read_bufs[ContentType::Handshake.idx()];
                 {
                     let vec = cursor.get_mut();
                     if vec.len() < 4 {
@@ -255,16 +256,9 @@ impl<S: Read + Write> TLSStream<S> {
 }
 
 const MAX_CHUNK_LEN : usize = 16384;
-const CONTENT_TYPES : [u8; 4] = [20, 21, 22, 23];
-const CHANGE_CIPHER_SPEC_IDX : usize = 0;
-const ALERT_IDX : usize = 1;
-const HANDSHAKE_IDX : usize = 2;
-const APPLICATION_DATA_IDX : usize = 3;
-const HEARTBEAT_IDX : usize = 4;
 const CLIENT_HELLO : u8 = 0x01;
 const SERVER_HELLO : u8 = 0x02;
 const CERTIFICATE : u8 = 0x0B;
-
 const EXTENSION_SERVER_NAME : u16 = 0;
 const EXTENSION_MAX_FRAGMENT_LENGTH : u16 = 1;
 const EXTENSION_CLIENT_CERTIFICATE_URL : u16 = 2;
@@ -275,7 +269,11 @@ const EXTENSION_SIGNATURE_ALGORITHMS : u16 = 13;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 enum ContentType {
-    ChangeCipherSpec, Alert, Handshake, ApplicationData, Heartbeat,
+    ChangeCipherSpec = 20,
+    Alert = 21,
+    Handshake = 22,
+    ApplicationData = 23,
+    Heartbeat = 24,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -286,21 +284,23 @@ struct ProtocolVersion {
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 enum AlertLevel {
-    Warning, Fatal,
+    Warning = 1, Fatal = 2,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 enum AlertDescription {
-    CloseNotify, UnexpectedMessage, BadRecordMac, DecryptionFailed,
-    RecordOverflow, DecompressionFailure, HandshakeFailure,
-    NoCertificateRESERVED, BadCertificate, UnsupportedCertificate,
-    CertificateRevoked, CertificateExpired, CertificateUnknown,
-    IllegalParameter, UnknownCA, AccessDenied, DecodeError, DecryptError,
-    ExportRestrictionRESERVED, ProtocolVersion, InsufficientSecurity,
-    InternalError, InappropriateFallback, UserCanceled, NoRenegotiation,
-    UnsupportedExtension, CertificateUnobtainable, UnrecognizedName,
-    BadCertificateStatusResponse, BadCertificateHashValue,
-    UnknownPSKIdentity,
+    CloseNotify = 0, UnexpectedMessage = 10, BadRecordMac = 20,
+    DecryptionFailed = 21, RecordOverflow = 22, DecompressionFailure = 30,
+    HandshakeFailure = 40, NoCertificateRESERVED = 41, BadCertificate = 42,
+    UnsupportedCertificate = 43, CertificateRevoked = 44,
+    CertificateExpired = 45, CertificateUnknown = 46, IllegalParameter = 47,
+    UnknownCA = 48, AccessDenied = 49, DecodeError = 50, DecryptError = 51,
+    ExportRestrictionRESERVED = 60, ProtocolVersion = 70,
+    InsufficientSecurity = 71, InternalError = 80, InappropriateFallback = 86,
+    UserCanceled = 90, NoRenegotiation = 100, UnsupportedExtension = 110,
+    CertificateUnobtainable = 111, UnrecognizedName = 112,
+    BadCertificateStatusResponse = 113, BadCertificateHashValue = 114,
+    UnknownPSKIdentity = 115,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -359,7 +359,7 @@ struct CipherSuite {
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 enum CompressionMethod {
-    Null,
+    Null = 0,
 }
 
 #[derive(Debug)]
@@ -389,43 +389,27 @@ impl<S: Read + Write> Drop for TLSStream<S> {
 
 impl ContentType {
     fn from_idx(idx: usize) -> ContentType {
-        return match idx {
-            CHANGE_CIPHER_SPEC_IDX => ContentType::ChangeCipherSpec,
-            ALERT_IDX => ContentType::Alert,
-            HANDSHAKE_IDX => ContentType::Handshake,
-            APPLICATION_DATA_IDX => ContentType::ApplicationData,
-            HEARTBEAT_IDX => ContentType::Heartbeat,
-            _ => panic!("Invalid ContentType index"),
-        };
+        return Self::from_id((idx + 20) as u8).unwrap();
     }
     fn idx(self) -> usize {
-        return match self {
-            ContentType::ChangeCipherSpec => CHANGE_CIPHER_SPEC_IDX,
-            ContentType::Alert => ALERT_IDX,
-            ContentType::Handshake => HANDSHAKE_IDX,
-            ContentType::ApplicationData => APPLICATION_DATA_IDX,
-            ContentType::Heartbeat => HEARTBEAT_IDX,
-        };
+        return (self.id() - 20) as usize;
     }
     fn from_id(id: u8) -> Option<ContentType> {
-        let ret = match id {
-            20 => ContentType::ChangeCipherSpec,
-            21 => ContentType::Alert,
-            22 => ContentType::Handshake,
-            23 => ContentType::ApplicationData,
-            24 => ContentType::Heartbeat,
-            _  => { return None; },
-        };
-        return Some(ret);
+        for &ct in [
+            ContentType::ChangeCipherSpec,
+            ContentType::Alert,
+            ContentType::Handshake,
+            ContentType::ApplicationData,
+            ContentType::Heartbeat,
+        ].iter() {
+            if id == (ct as u8) {
+                return Some(ct);
+            }
+        }
+        return None;
     }
     fn id(self) -> u8 {
-        return match self {
-            ContentType::ChangeCipherSpec => 20,
-            ContentType::Alert => 21,
-            ContentType::Handshake => 22,
-            ContentType::ApplicationData => 23,
-            ContentType::Heartbeat => 24,
-        };
+        return self as u8;
     }
     fn parse(id: u8) -> io::Result<Self> {
         return Self::from_id(id).ok_or(
@@ -444,102 +428,83 @@ impl ProtocolVersion {
 }
 
 impl AlertLevel {
-    fn from_id(id: u8) -> AlertLevel {
-        return match id {
-            1 => AlertLevel::Warning,
-            2 => AlertLevel::Fatal,
-            _ => panic!("Unknown Alert Level ID"), // TODO
+    fn from_id(id: u8) -> Option<AlertLevel> {
+        let ret = match id {
+            id if id == (AlertLevel::Warning as u8) => AlertLevel::Warning,
+            id if id == (AlertLevel::Fatal as u8) => AlertLevel::Fatal,
+            _ => { return None; },
         };
+        return Some(ret);
     }
     fn id(self) -> u8 {
-        return match self {
-            AlertLevel::Warning => 1,
-            AlertLevel::Fatal => 2,
-        };
+        return self as u8;
+    }
+    fn parse(id: u8) -> io::Result<AlertLevel> {
+        return Self::from_id(id).ok_or(
+            io::Error::new(io::ErrorKind::InvalidData, "Invalid AlertLevel"));
     }
 }
 
 impl AlertDescription {
-    fn from_id(id: u8) -> AlertDescription {
-        return match id {
-              0 => AlertDescription::CloseNotify,
-             10 => AlertDescription::UnexpectedMessage,
-             20 => AlertDescription::BadRecordMac,
-             21 => AlertDescription::DecryptionFailed,
-             22 => AlertDescription::RecordOverflow,
-             30 => AlertDescription::DecompressionFailure,
-             40 => AlertDescription::HandshakeFailure,
-             41 => AlertDescription::NoCertificateRESERVED,
-             42 => AlertDescription::BadCertificate,
-             43 => AlertDescription::UnsupportedCertificate,
-             44 => AlertDescription::CertificateRevoked,
-             45 => AlertDescription::CertificateExpired,
-             46 => AlertDescription::CertificateUnknown,
-             47 => AlertDescription::IllegalParameter,
-             48 => AlertDescription::UnknownCA,
-             49 => AlertDescription::AccessDenied,
-             50 => AlertDescription::DecodeError,
-             51 => AlertDescription::DecryptError,
-             60 => AlertDescription::ExportRestrictionRESERVED,
-             70 => AlertDescription::ProtocolVersion,
-             71 => AlertDescription::InsufficientSecurity,
-             80 => AlertDescription::InternalError,
-             86 => AlertDescription::InappropriateFallback,
-             90 => AlertDescription::UserCanceled,
-            100 => AlertDescription::NoRenegotiation,
-            110 => AlertDescription::UnsupportedExtension,
-            111 => AlertDescription::CertificateUnobtainable,
-            112 => AlertDescription::UnrecognizedName,
-            113 => AlertDescription::BadCertificateStatusResponse,
-            114 => AlertDescription::BadCertificateHashValue,
-            115 => AlertDescription::UnknownPSKIdentity,
-            _   => panic!("Unknown Alert Description ID"), // TODO
-        };
+    fn from_id(id: u8) -> Option<AlertDescription> {
+        for &ad in [
+            AlertDescription::CloseNotify,
+            AlertDescription::UnexpectedMessage,
+            AlertDescription::BadRecordMac,
+            AlertDescription::DecryptionFailed,
+            AlertDescription::RecordOverflow,
+            AlertDescription::DecompressionFailure,
+            AlertDescription::HandshakeFailure,
+            AlertDescription::NoCertificateRESERVED,
+            AlertDescription::BadCertificate,
+            AlertDescription::UnsupportedCertificate,
+            AlertDescription::CertificateRevoked,
+            AlertDescription::CertificateExpired,
+            AlertDescription::CertificateUnknown,
+            AlertDescription::IllegalParameter,
+            AlertDescription::UnknownCA,
+            AlertDescription::AccessDenied,
+            AlertDescription::DecodeError,
+            AlertDescription::DecryptError,
+            AlertDescription::ExportRestrictionRESERVED,
+            AlertDescription::ProtocolVersion,
+            AlertDescription::InsufficientSecurity,
+            AlertDescription::InternalError,
+            AlertDescription::InappropriateFallback,
+            AlertDescription::UserCanceled,
+            AlertDescription::NoRenegotiation,
+            AlertDescription::UnsupportedExtension,
+            AlertDescription::CertificateUnobtainable,
+            AlertDescription::UnrecognizedName,
+            AlertDescription::BadCertificateStatusResponse,
+            AlertDescription::BadCertificateHashValue,
+            AlertDescription::UnknownPSKIdentity,
+        ].iter() {
+            if id == (ad as u8) {
+                return Some(ad);
+            }
+        }
+        return None;
     }
     fn id(self) -> u8 {
-        return match self {
-            AlertDescription::CloseNotify => 0,
-            AlertDescription::UnexpectedMessage => 10,
-            AlertDescription::BadRecordMac => 20,
-            AlertDescription::DecryptionFailed => 21,
-            AlertDescription::RecordOverflow => 22,
-            AlertDescription::DecompressionFailure => 30,
-            AlertDescription::HandshakeFailure => 40,
-            AlertDescription::NoCertificateRESERVED => 41,
-            AlertDescription::BadCertificate => 42,
-            AlertDescription::UnsupportedCertificate => 43,
-            AlertDescription::CertificateRevoked => 44,
-            AlertDescription::CertificateExpired => 45,
-            AlertDescription::CertificateUnknown => 46,
-            AlertDescription::IllegalParameter => 47,
-            AlertDescription::UnknownCA => 48,
-            AlertDescription::AccessDenied => 49,
-            AlertDescription::DecodeError => 50,
-            AlertDescription::DecryptError => 51,
-            AlertDescription::ExportRestrictionRESERVED => 60,
-            AlertDescription::ProtocolVersion => 70,
-            AlertDescription::InsufficientSecurity => 71,
-            AlertDescription::InternalError => 80,
-            AlertDescription::InappropriateFallback => 86,
-            AlertDescription::UserCanceled => 90,
-            AlertDescription::NoRenegotiation => 100,
-            AlertDescription::UnsupportedExtension => 110,
-            AlertDescription::CertificateUnobtainable => 111,
-            AlertDescription::UnrecognizedName => 112,
-            AlertDescription::BadCertificateStatusResponse => 113,
-            AlertDescription::BadCertificateHashValue => 114,
-            AlertDescription::UnknownPSKIdentity => 115,
-        };
+        return self as u8;
+    }
+    fn parse(id: u8) -> io::Result<AlertDescription> {
+        return Self::from_id(id).ok_or(
+            io::Error::new(io::ErrorKind::InvalidData,
+                           "Invalid AlertDescription"));
     }
 }
 
 impl Alert {
     fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
-        let level = try!(src.read_u8());
-        let description = try!(src.read_u8());
+        let level_id = try!(src.read_u8());
+        let level = try!(AlertLevel::parse(level_id));
+        let description_id = try!(src.read_u8());
+        let description = try!(AlertDescription::parse(description_id));
         return Ok(Alert {
-            level: AlertLevel::from_id(level),
-            description: AlertDescription::from_id(description),
+            level: level,
+            description: description,
         });
     }
     fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
@@ -736,16 +701,17 @@ impl CipherSuite {
 
 impl CompressionMethod {
     fn from_id(id: u8) -> Option<CompressionMethod> {
-        let ret = match id {
-            0 => CompressionMethod::Null,
-            _  => { return None; },
-        };
-        return Some(ret);
+        for &cm in [
+            CompressionMethod::Null,
+        ].iter() {
+            if id == (cm as u8) {
+                return Some(cm);
+            }
+        }
+        return None;
     }
     fn id(self) -> u8 {
-        return match self {
-            CompressionMethod::Null => 0,
-        };
+        return self as u8;
     }
     fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
         let id = try!(src.read_u8());
