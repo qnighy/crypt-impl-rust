@@ -60,13 +60,12 @@ impl<S: Read + Write> TLSStream<S> {
             random: client_random,
             session_id: SessionID::empty(),
             cipher_suites: vec![
-                CipherSuite { id: TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, },
-                CipherSuite { id: TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, },
-                CipherSuite { id: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, },
-                CipherSuite { id: TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, },
-                CipherSuite { id: TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, },
-                CipherSuite { id: TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, },
-                CipherSuite { id: TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, },
+                CipherSuite::TlsEcdheEcdsaWithAes128GcmSha256,
+                CipherSuite::TlsEcdheRsaWithAes128GcmSha256,
+                CipherSuite::TlsEcdheEcdsaWithAes256GcmSha384,
+                CipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256,
+                CipherSuite::TlsEcdheRsaWithAes256GcmSha384,
+                CipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256,
             ],
             compression_methods: vec![
                 CompressionMethod::Null,
@@ -350,11 +349,6 @@ struct TLSRandom {
 struct SessionID {
     length: usize,
     bytes: [u8; 32],
-}
-
-#[derive(Debug)]
-struct CipherSuite {
-    id: u16,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -686,15 +680,29 @@ impl SessionID {
 }
 
 impl CipherSuite {
+    fn from_id(id: u16) -> Option<Self> {
+        for &cs in CIPHER_SUITE_LIST.iter() {
+            if id == (cs as u16) {
+                return Some(cs);
+            }
+        }
+        return None;
+    }
+    fn id(self) -> u16 {
+        return self as u16;
+    }
+    fn parse(id: u16) -> io::Result<Self> {
+        return Self::from_id(id).ok_or(
+            io::Error::new(io::ErrorKind::InvalidData,
+                           "Invalid CipherSuite"));
+    }
     fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
         let id = try!(src.read_u16::<NetworkEndian>());
-        let ret = CipherSuite {
-            id: id
-        };
+        let ret = try!(Self::parse(id));
         return Ok(ret);
     }
     fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
-        try!(dest.write_u16::<NetworkEndian>(self.id));
+        try!(dest.write_u16::<NetworkEndian>(self.id()));
         return Ok(());
     }
 }
@@ -859,359 +867,664 @@ impl SecurityParameters {
     }
 }
 
-pub const TLS_NULL_WITH_NULL_NULL                       : u16 = 0x0000;
-pub const TLS_RSA_WITH_NULL_MD5                         : u16 = 0x0001;
-pub const TLS_RSA_WITH_NULL_SHA                         : u16 = 0x0002;
-pub const TLS_RSA_EXPORT_WITH_RC4_40_MD5                : u16 = 0x0003;
-pub const TLS_RSA_WITH_RC4_128_MD5                      : u16 = 0x0004;
-pub const TLS_RSA_WITH_RC4_128_SHA                      : u16 = 0x0005;
-pub const TLS_RSA_EXPORT_WITH_RC2_CBC_40_MD5            : u16 = 0x0006;
-pub const TLS_RSA_WITH_IDEA_CBC_SHA                     : u16 = 0x0007;
-pub const TLS_RSA_EXPORT_WITH_DES40_CBC_SHA             : u16 = 0x0008;
-pub const TLS_RSA_WITH_DES_CBC_SHA                      : u16 = 0x0009;
-pub const TLS_RSA_WITH_3DES_EDE_CBC_SHA                 : u16 = 0x000A;
-pub const TLS_DH_DSS_EXPORT_WITH_DES40_CBC_SHA          : u16 = 0x000B;
-pub const TLS_DH_DSS_WITH_DES_CBC_SHA                   : u16 = 0x000C;
-pub const TLS_DH_DSS_WITH_3DES_EDE_CBC_SHA              : u16 = 0x000D;
-pub const TLS_DH_RSA_EXPORT_WITH_DES40_CBC_SHA          : u16 = 0x000E;
-pub const TLS_DH_RSA_WITH_DES_CBC_SHA                   : u16 = 0x000F;
-pub const TLS_DH_RSA_WITH_3DES_EDE_CBC_SHA              : u16 = 0x0010;
-pub const TLS_DHE_DSS_EXPORT_WITH_DES40_CBC_SHA         : u16 = 0x0011;
-pub const TLS_DHE_DSS_WITH_DES_CBC_SHA                  : u16 = 0x0012;
-pub const TLS_DHE_DSS_WITH_3DES_EDE_CBC_SHA             : u16 = 0x0013;
-pub const TLS_DHE_RSA_EXPORT_WITH_DES40_CBC_SHA         : u16 = 0x0014;
-pub const TLS_DHE_RSA_WITH_DES_CBC_SHA                  : u16 = 0x0015;
-pub const TLS_DHE_RSA_WITH_3DES_EDE_CBC_SHA             : u16 = 0x0016;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_EXPORT_WITH_RC4_40_MD5            : u16 = 0x0017;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_RC4_128_MD5                  : u16 = 0x0018;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_EXPORT_WITH_DES40_CBC_SHA         : u16 = 0x0019;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_DES_CBC_SHA                  : u16 = 0x001A;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_3DES_EDE_CBC_SHA             : u16 = 0x001B;
-pub const TLS_KRB5_WITH_DES_CBC_SHA                     : u16 = 0x001E;
-pub const TLS_KRB5_WITH_3DES_EDE_CBC_SHA                : u16 = 0x001F;
-pub const TLS_KRB5_WITH_RC4_128_SHA                     : u16 = 0x0020;
-pub const TLS_KRB5_WITH_IDEA_CBC_SHA                    : u16 = 0x0021;
-pub const TLS_KRB5_WITH_DES_CBC_MD5                     : u16 = 0x0022;
-pub const TLS_KRB5_WITH_3DES_EDE_CBC_MD5                : u16 = 0x0023;
-pub const TLS_KRB5_WITH_RC4_128_MD5                     : u16 = 0x0024;
-pub const TLS_KRB5_WITH_IDEA_CBC_MD5                    : u16 = 0x0025;
-pub const TLS_KRB5_EXPORT_WITH_DES_CBC_40_SHA           : u16 = 0x0026;
-pub const TLS_KRB5_EXPORT_WITH_RC2_CBC_40_SHA           : u16 = 0x0027;
-pub const TLS_KRB5_EXPORT_WITH_RC4_40_SHA               : u16 = 0x0028;
-pub const TLS_KRB5_EXPORT_WITH_DES_CBC_40_MD5           : u16 = 0x0029;
-pub const TLS_KRB5_EXPORT_WITH_RC2_CBC_40_MD5           : u16 = 0x002A;
-pub const TLS_KRB5_EXPORT_WITH_RC4_40_MD5               : u16 = 0x002B;
-pub const TLS_PSK_WITH_NULL_SHA                         : u16 = 0x002C;
-pub const TLS_DHE_PSK_WITH_NULL_SHA                     : u16 = 0x002D;
-pub const TLS_RSA_PSK_WITH_NULL_SHA                     : u16 = 0x002E;
-pub const TLS_RSA_WITH_AES_128_CBC_SHA                  : u16 = 0x002F;
-pub const TLS_DH_DSS_WITH_AES_128_CBC_SHA               : u16 = 0x0030;
-pub const TLS_DH_RSA_WITH_AES_128_CBC_SHA               : u16 = 0x0031;
-pub const TLS_DHE_DSS_WITH_AES_128_CBC_SHA              : u16 = 0x0032;
-pub const TLS_DHE_RSA_WITH_AES_128_CBC_SHA              : u16 = 0x0033;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_AES_128_CBC_SHA              : u16 = 0x0034;
-pub const TLS_RSA_WITH_AES_256_CBC_SHA                  : u16 = 0x0035;
-pub const TLS_DH_DSS_WITH_AES_256_CBC_SHA               : u16 = 0x0036;
-pub const TLS_DH_RSA_WITH_AES_256_CBC_SHA               : u16 = 0x0037;
-pub const TLS_DHE_DSS_WITH_AES_256_CBC_SHA              : u16 = 0x0038;
-pub const TLS_DHE_RSA_WITH_AES_256_CBC_SHA              : u16 = 0x0039;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_AES_256_CBC_SHA              : u16 = 0x003A;
-pub const TLS_RSA_WITH_NULL_SHA256                      : u16 = 0x003B;
-pub const TLS_RSA_WITH_AES_128_CBC_SHA256               : u16 = 0x003C;
-pub const TLS_RSA_WITH_AES_256_CBC_SHA256               : u16 = 0x003D;
-pub const TLS_DH_DSS_WITH_AES_128_CBC_SHA256            : u16 = 0x003E;
-pub const TLS_DH_RSA_WITH_AES_128_CBC_SHA256            : u16 = 0x003F;
-pub const TLS_DHE_DSS_WITH_AES_128_CBC_SHA256           : u16 = 0x0040;
-pub const TLS_RSA_WITH_CAMELLIA_128_CBC_SHA             : u16 = 0x0041;
-pub const TLS_DH_DSS_WITH_CAMELLIA_128_CBC_SHA          : u16 = 0x0042;
-pub const TLS_DH_RSA_WITH_CAMELLIA_128_CBC_SHA          : u16 = 0x0043;
-pub const TLS_DHE_DSS_WITH_CAMELLIA_128_CBC_SHA         : u16 = 0x0044;
-pub const TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA         : u16 = 0x0045;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_CAMELLIA_128_CBC_SHA         : u16 = 0x0046;
-pub const TLS_DHE_RSA_WITH_AES_128_CBC_SHA256           : u16 = 0x0067;
-pub const TLS_DH_DSS_WITH_AES_256_CBC_SHA256            : u16 = 0x0068;
-pub const TLS_DH_RSA_WITH_AES_256_CBC_SHA256            : u16 = 0x0069;
-pub const TLS_DHE_DSS_WITH_AES_256_CBC_SHA256           : u16 = 0x006A;
-pub const TLS_DHE_RSA_WITH_AES_256_CBC_SHA256           : u16 = 0x006B;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_AES_128_CBC_SHA256           : u16 = 0x006C;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_AES_256_CBC_SHA256           : u16 = 0x006D;
-pub const TLS_RSA_WITH_CAMELLIA_256_CBC_SHA             : u16 = 0x0084;
-pub const TLS_DH_DSS_WITH_CAMELLIA_256_CBC_SHA          : u16 = 0x0085;
-pub const TLS_DH_RSA_WITH_CAMELLIA_256_CBC_SHA          : u16 = 0x0086;
-pub const TLS_DHE_DSS_WITH_CAMELLIA_256_CBC_SHA         : u16 = 0x0087;
-pub const TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA         : u16 = 0x0088;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_CAMELLIA_256_CBC_SHA         : u16 = 0x0089;
-pub const TLS_PSK_WITH_RC4_128_SHA                      : u16 = 0x008A;
-pub const TLS_PSK_WITH_3DES_EDE_CBC_SHA                 : u16 = 0x008B;
-pub const TLS_PSK_WITH_AES_128_CBC_SHA                  : u16 = 0x008C;
-pub const TLS_PSK_WITH_AES_256_CBC_SHA                  : u16 = 0x008D;
-pub const TLS_DHE_PSK_WITH_RC4_128_SHA                  : u16 = 0x008E;
-pub const TLS_DHE_PSK_WITH_3DES_EDE_CBC_SHA             : u16 = 0x008F;
-pub const TLS_DHE_PSK_WITH_AES_128_CBC_SHA              : u16 = 0x0090;
-pub const TLS_DHE_PSK_WITH_AES_256_CBC_SHA              : u16 = 0x0091;
-pub const TLS_RSA_PSK_WITH_RC4_128_SHA                  : u16 = 0x0092;
-pub const TLS_RSA_PSK_WITH_3DES_EDE_CBC_SHA             : u16 = 0x0093;
-pub const TLS_RSA_PSK_WITH_AES_128_CBC_SHA              : u16 = 0x0094;
-pub const TLS_RSA_PSK_WITH_AES_256_CBC_SHA              : u16 = 0x0095;
-pub const TLS_RSA_WITH_SEED_CBC_SHA                     : u16 = 0x0096;
-pub const TLS_DH_DSS_WITH_SEED_CBC_SHA                  : u16 = 0x0097;
-pub const TLS_DH_RSA_WITH_SEED_CBC_SHA                  : u16 = 0x0098;
-pub const TLS_DHE_DSS_WITH_SEED_CBC_SHA                 : u16 = 0x0099;
-pub const TLS_DHE_RSA_WITH_SEED_CBC_SHA                 : u16 = 0x009A;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_SEED_CBC_SHA                 : u16 = 0x009B;
-pub const TLS_RSA_WITH_AES_128_GCM_SHA256               : u16 = 0x009C;
-pub const TLS_RSA_WITH_AES_256_GCM_SHA384               : u16 = 0x009D;
-pub const TLS_DHE_RSA_WITH_AES_128_GCM_SHA256           : u16 = 0x009E;
-pub const TLS_DHE_RSA_WITH_AES_256_GCM_SHA384           : u16 = 0x009F;
-pub const TLS_DH_RSA_WITH_AES_128_GCM_SHA256            : u16 = 0x00A0;
-pub const TLS_DH_RSA_WITH_AES_256_GCM_SHA384            : u16 = 0x00A1;
-pub const TLS_DHE_DSS_WITH_AES_128_GCM_SHA256           : u16 = 0x00A2;
-pub const TLS_DHE_DSS_WITH_AES_256_GCM_SHA384           : u16 = 0x00A3;
-pub const TLS_DH_DSS_WITH_AES_128_GCM_SHA256            : u16 = 0x00A4;
-pub const TLS_DH_DSS_WITH_AES_256_GCM_SHA384            : u16 = 0x00A5;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_AES_128_GCM_SHA256           : u16 = 0x00A6;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_AES_256_GCM_SHA384           : u16 = 0x00A7;
-pub const TLS_PSK_WITH_AES_128_GCM_SHA256               : u16 = 0x00A8;
-pub const TLS_PSK_WITH_AES_256_GCM_SHA384               : u16 = 0x00A9;
-pub const TLS_DHE_PSK_WITH_AES_128_GCM_SHA256           : u16 = 0x00AA;
-pub const TLS_DHE_PSK_WITH_AES_256_GCM_SHA384           : u16 = 0x00AB;
-pub const TLS_RSA_PSK_WITH_AES_128_GCM_SHA256           : u16 = 0x00AC;
-pub const TLS_RSA_PSK_WITH_AES_256_GCM_SHA384           : u16 = 0x00AD;
-pub const TLS_PSK_WITH_AES_128_CBC_SHA256               : u16 = 0x00AE;
-pub const TLS_PSK_WITH_AES_256_CBC_SHA384               : u16 = 0x00AF;
-pub const TLS_PSK_WITH_NULL_SHA256                      : u16 = 0x00B0;
-pub const TLS_PSK_WITH_NULL_SHA384                      : u16 = 0x00B1;
-pub const TLS_DHE_PSK_WITH_AES_128_CBC_SHA256           : u16 = 0x00B2;
-pub const TLS_DHE_PSK_WITH_AES_256_CBC_SHA384           : u16 = 0x00B3;
-pub const TLS_DHE_PSK_WITH_NULL_SHA256                  : u16 = 0x00B4;
-pub const TLS_DHE_PSK_WITH_NULL_SHA384                  : u16 = 0x00B5;
-pub const TLS_RSA_PSK_WITH_AES_128_CBC_SHA256           : u16 = 0x00B6;
-pub const TLS_RSA_PSK_WITH_AES_256_CBC_SHA384           : u16 = 0x00B7;
-pub const TLS_RSA_PSK_WITH_NULL_SHA256                  : u16 = 0x00B8;
-pub const TLS_RSA_PSK_WITH_NULL_SHA384                  : u16 = 0x00B9;
-pub const TLS_RSA_WITH_CAMELLIA_128_CBC_SHA256          : u16 = 0x00BA;
-pub const TLS_DH_DSS_WITH_CAMELLIA_128_CBC_SHA256       : u16 = 0x00BB;
-pub const TLS_DH_RSA_WITH_CAMELLIA_128_CBC_SHA256       : u16 = 0x00BC;
-pub const TLS_DHE_DSS_WITH_CAMELLIA_128_CBC_SHA256      : u16 = 0x00BD;
-pub const TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA256      : u16 = 0x00BE;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_CAMELLIA_128_CBC_SHA256      : u16 = 0x00BF;
-pub const TLS_RSA_WITH_CAMELLIA_256_CBC_SHA256          : u16 = 0x00C0;
-pub const TLS_DH_DSS_WITH_CAMELLIA_256_CBC_SHA256       : u16 = 0x00C1;
-pub const TLS_DH_RSA_WITH_CAMELLIA_256_CBC_SHA256       : u16 = 0x00C2;
-pub const TLS_DHE_DSS_WITH_CAMELLIA_256_CBC_SHA256      : u16 = 0x00C3;
-pub const TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA256      : u16 = 0x00C4;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_CAMELLIA_256_CBC_SHA256      : u16 = 0x00C5;
-pub const TLS_EMPTY_RENEGOTIATION_INFO_SCSV             : u16 = 0x00FF;
-pub const TLS_FALLBACK_SCSV                             : u16 = 0x5600;
-pub const TLS_ECDH_ECDSA_WITH_NULL_SHA                  : u16 = 0xC001;
-pub const TLS_ECDH_ECDSA_WITH_RC4_128_SHA               : u16 = 0xC002;
-pub const TLS_ECDH_ECDSA_WITH_3DES_EDE_CBC_SHA          : u16 = 0xC003;
-pub const TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA           : u16 = 0xC004;
-pub const TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA           : u16 = 0xC005;
-pub const TLS_ECDHE_ECDSA_WITH_NULL_SHA                 : u16 = 0xC006;
-pub const TLS_ECDHE_ECDSA_WITH_RC4_128_SHA              : u16 = 0xC007;
-pub const TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA         : u16 = 0xC008;
-pub const TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA          : u16 = 0xC009;
-pub const TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA          : u16 = 0xC00A;
-pub const TLS_ECDH_RSA_WITH_NULL_SHA                    : u16 = 0xC00B;
-pub const TLS_ECDH_RSA_WITH_RC4_128_SHA                 : u16 = 0xC00C;
-pub const TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA            : u16 = 0xC00D;
-pub const TLS_ECDH_RSA_WITH_AES_128_CBC_SHA             : u16 = 0xC00E;
-pub const TLS_ECDH_RSA_WITH_AES_256_CBC_SHA             : u16 = 0xC00F;
-pub const TLS_ECDHE_RSA_WITH_NULL_SHA                   : u16 = 0xC010;
-pub const TLS_ECDHE_RSA_WITH_RC4_128_SHA                : u16 = 0xC011;
-pub const TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA           : u16 = 0xC012;
-pub const TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA            : u16 = 0xC013;
-pub const TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA            : u16 = 0xC014;
-#[allow(non_upper_case_globals)]
-pub const TLS_ECDH_anon_WITH_NULL_SHA                   : u16 = 0xC015;
-#[allow(non_upper_case_globals)]
-pub const TLS_ECDH_anon_WITH_RC4_128_SHA                : u16 = 0xC016;
-#[allow(non_upper_case_globals)]
-pub const TLS_ECDH_anon_WITH_3DES_EDE_CBC_SHA           : u16 = 0xC017;
-#[allow(non_upper_case_globals)]
-pub const TLS_ECDH_anon_WITH_AES_128_CBC_SHA            : u16 = 0xC018;
-#[allow(non_upper_case_globals)]
-pub const TLS_ECDH_anon_WITH_AES_256_CBC_SHA            : u16 = 0xC019;
-pub const TLS_SRP_SHA_WITH_3DES_EDE_CBC_SHA             : u16 = 0xC01A;
-pub const TLS_SRP_SHA_RSA_WITH_3DES_EDE_CBC_SHA         : u16 = 0xC01B;
-pub const TLS_SRP_SHA_DSS_WITH_3DES_EDE_CBC_SHA         : u16 = 0xC01C;
-pub const TLS_SRP_SHA_WITH_AES_128_CBC_SHA              : u16 = 0xC01D;
-pub const TLS_SRP_SHA_RSA_WITH_AES_128_CBC_SHA          : u16 = 0xC01E;
-pub const TLS_SRP_SHA_DSS_WITH_AES_128_CBC_SHA          : u16 = 0xC01F;
-pub const TLS_SRP_SHA_WITH_AES_256_CBC_SHA              : u16 = 0xC020;
-pub const TLS_SRP_SHA_RSA_WITH_AES_256_CBC_SHA          : u16 = 0xC021;
-pub const TLS_SRP_SHA_DSS_WITH_AES_256_CBC_SHA          : u16 = 0xC022;
-pub const TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256       : u16 = 0xC023;
-pub const TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384       : u16 = 0xC024;
-pub const TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA256        : u16 = 0xC025;
-pub const TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384        : u16 = 0xC026;
-pub const TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256         : u16 = 0xC027;
-pub const TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384         : u16 = 0xC028;
-pub const TLS_ECDH_RSA_WITH_AES_128_CBC_SHA256          : u16 = 0xC029;
-pub const TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384          : u16 = 0xC02A;
-pub const TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256       : u16 = 0xC02B;
-pub const TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384       : u16 = 0xC02C;
-pub const TLS_ECDH_ECDSA_WITH_AES_128_GCM_SHA256        : u16 = 0xC02D;
-pub const TLS_ECDH_ECDSA_WITH_AES_256_GCM_SHA384        : u16 = 0xC02E;
-pub const TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256         : u16 = 0xC02F;
-pub const TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384         : u16 = 0xC030;
-pub const TLS_ECDH_RSA_WITH_AES_128_GCM_SHA256          : u16 = 0xC031;
-pub const TLS_ECDH_RSA_WITH_AES_256_GCM_SHA384          : u16 = 0xC032;
-pub const TLS_ECDHE_PSK_WITH_RC4_128_SHA                : u16 = 0xC033;
-pub const TLS_ECDHE_PSK_WITH_3DES_EDE_CBC_SHA           : u16 = 0xC034;
-pub const TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA            : u16 = 0xC035;
-pub const TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA            : u16 = 0xC036;
-pub const TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA256         : u16 = 0xC037;
-pub const TLS_ECDHE_PSK_WITH_AES_256_CBC_SHA384         : u16 = 0xC038;
-pub const TLS_ECDHE_PSK_WITH_NULL_SHA                   : u16 = 0xC039;
-pub const TLS_ECDHE_PSK_WITH_NULL_SHA256                : u16 = 0xC03A;
-pub const TLS_ECDHE_PSK_WITH_NULL_SHA384                : u16 = 0xC03B;
-pub const TLS_RSA_WITH_ARIA_128_CBC_SHA256              : u16 = 0xC03C;
-pub const TLS_RSA_WITH_ARIA_256_CBC_SHA384              : u16 = 0xC03D;
-pub const TLS_DH_DSS_WITH_ARIA_128_CBC_SHA256           : u16 = 0xC03E;
-pub const TLS_DH_DSS_WITH_ARIA_256_CBC_SHA384           : u16 = 0xC03F;
-pub const TLS_DH_RSA_WITH_ARIA_128_CBC_SHA256           : u16 = 0xC040;
-pub const TLS_DH_RSA_WITH_ARIA_256_CBC_SHA384           : u16 = 0xC041;
-pub const TLS_DHE_DSS_WITH_ARIA_128_CBC_SHA256          : u16 = 0xC042;
-pub const TLS_DHE_DSS_WITH_ARIA_256_CBC_SHA384          : u16 = 0xC043;
-pub const TLS_DHE_RSA_WITH_ARIA_128_CBC_SHA256          : u16 = 0xC044;
-pub const TLS_DHE_RSA_WITH_ARIA_256_CBC_SHA384          : u16 = 0xC045;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_ARIA_128_CBC_SHA256          : u16 = 0xC046;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_ARIA_256_CBC_SHA384          : u16 = 0xC047;
-pub const TLS_ECDHE_ECDSA_WITH_ARIA_128_CBC_SHA256      : u16 = 0xC048;
-pub const TLS_ECDHE_ECDSA_WITH_ARIA_256_CBC_SHA384      : u16 = 0xC049;
-pub const TLS_ECDH_ECDSA_WITH_ARIA_128_CBC_SHA256       : u16 = 0xC04A;
-pub const TLS_ECDH_ECDSA_WITH_ARIA_256_CBC_SHA384       : u16 = 0xC04B;
-pub const TLS_ECDHE_RSA_WITH_ARIA_128_CBC_SHA256        : u16 = 0xC04C;
-pub const TLS_ECDHE_RSA_WITH_ARIA_256_CBC_SHA384        : u16 = 0xC04D;
-pub const TLS_ECDH_RSA_WITH_ARIA_128_CBC_SHA256         : u16 = 0xC04E;
-pub const TLS_ECDH_RSA_WITH_ARIA_256_CBC_SHA384         : u16 = 0xC04F;
-pub const TLS_RSA_WITH_ARIA_128_GCM_SHA256              : u16 = 0xC050;
-pub const TLS_RSA_WITH_ARIA_256_GCM_SHA384              : u16 = 0xC051;
-pub const TLS_DHE_RSA_WITH_ARIA_128_GCM_SHA256          : u16 = 0xC052;
-pub const TLS_DHE_RSA_WITH_ARIA_256_GCM_SHA384          : u16 = 0xC053;
-pub const TLS_DH_RSA_WITH_ARIA_128_GCM_SHA256           : u16 = 0xC054;
-pub const TLS_DH_RSA_WITH_ARIA_256_GCM_SHA384           : u16 = 0xC055;
-pub const TLS_DHE_DSS_WITH_ARIA_128_GCM_SHA256          : u16 = 0xC056;
-pub const TLS_DHE_DSS_WITH_ARIA_256_GCM_SHA384          : u16 = 0xC057;
-pub const TLS_DH_DSS_WITH_ARIA_128_GCM_SHA256           : u16 = 0xC058;
-pub const TLS_DH_DSS_WITH_ARIA_256_GCM_SHA384           : u16 = 0xC059;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_ARIA_128_GCM_SHA256          : u16 = 0xC05A;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_ARIA_256_GCM_SHA384          : u16 = 0xC05B;
-pub const TLS_ECDHE_ECDSA_WITH_ARIA_128_GCM_SHA256      : u16 = 0xC05C;
-pub const TLS_ECDHE_ECDSA_WITH_ARIA_256_GCM_SHA384      : u16 = 0xC05D;
-pub const TLS_ECDH_ECDSA_WITH_ARIA_128_GCM_SHA256       : u16 = 0xC05E;
-pub const TLS_ECDH_ECDSA_WITH_ARIA_256_GCM_SHA384       : u16 = 0xC05F;
-pub const TLS_ECDHE_RSA_WITH_ARIA_128_GCM_SHA256        : u16 = 0xC060;
-pub const TLS_ECDHE_RSA_WITH_ARIA_256_GCM_SHA384        : u16 = 0xC061;
-pub const TLS_ECDH_RSA_WITH_ARIA_128_GCM_SHA256         : u16 = 0xC062;
-pub const TLS_ECDH_RSA_WITH_ARIA_256_GCM_SHA384         : u16 = 0xC063;
-pub const TLS_PSK_WITH_ARIA_128_CBC_SHA256              : u16 = 0xC064;
-pub const TLS_PSK_WITH_ARIA_256_CBC_SHA384              : u16 = 0xC065;
-pub const TLS_DHE_PSK_WITH_ARIA_128_CBC_SHA256          : u16 = 0xC066;
-pub const TLS_DHE_PSK_WITH_ARIA_256_CBC_SHA384          : u16 = 0xC067;
-pub const TLS_RSA_PSK_WITH_ARIA_128_CBC_SHA256          : u16 = 0xC068;
-pub const TLS_RSA_PSK_WITH_ARIA_256_CBC_SHA384          : u16 = 0xC069;
-pub const TLS_PSK_WITH_ARIA_128_GCM_SHA256              : u16 = 0xC06A;
-pub const TLS_PSK_WITH_ARIA_256_GCM_SHA384              : u16 = 0xC06B;
-pub const TLS_DHE_PSK_WITH_ARIA_128_GCM_SHA256          : u16 = 0xC06C;
-pub const TLS_DHE_PSK_WITH_ARIA_256_GCM_SHA384          : u16 = 0xC06D;
-pub const TLS_RSA_PSK_WITH_ARIA_128_GCM_SHA256          : u16 = 0xC06E;
-pub const TLS_RSA_PSK_WITH_ARIA_256_GCM_SHA384          : u16 = 0xC06F;
-pub const TLS_ECDHE_PSK_WITH_ARIA_128_CBC_SHA256        : u16 = 0xC070;
-pub const TLS_ECDHE_PSK_WITH_ARIA_256_CBC_SHA384        : u16 = 0xC071;
-pub const TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_CBC_SHA256  : u16 = 0xC072;
-pub const TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_CBC_SHA384  : u16 = 0xC073;
-pub const TLS_ECDH_ECDSA_WITH_CAMELLIA_128_CBC_SHA256   : u16 = 0xC074;
-pub const TLS_ECDH_ECDSA_WITH_CAMELLIA_256_CBC_SHA384   : u16 = 0xC075;
-pub const TLS_ECDHE_RSA_WITH_CAMELLIA_128_CBC_SHA256    : u16 = 0xC076;
-pub const TLS_ECDHE_RSA_WITH_CAMELLIA_256_CBC_SHA384    : u16 = 0xC077;
-pub const TLS_ECDH_RSA_WITH_CAMELLIA_128_CBC_SHA256     : u16 = 0xC078;
-pub const TLS_ECDH_RSA_WITH_CAMELLIA_256_CBC_SHA384     : u16 = 0xC079;
-pub const TLS_RSA_WITH_CAMELLIA_128_GCM_SHA256          : u16 = 0xC07A;
-pub const TLS_RSA_WITH_CAMELLIA_256_GCM_SHA384          : u16 = 0xC07B;
-pub const TLS_DHE_RSA_WITH_CAMELLIA_128_GCM_SHA256      : u16 = 0xC07C;
-pub const TLS_DHE_RSA_WITH_CAMELLIA_256_GCM_SHA384      : u16 = 0xC07D;
-pub const TLS_DH_RSA_WITH_CAMELLIA_128_GCM_SHA256       : u16 = 0xC07E;
-pub const TLS_DH_RSA_WITH_CAMELLIA_256_GCM_SHA384       : u16 = 0xC07F;
-pub const TLS_DHE_DSS_WITH_CAMELLIA_128_GCM_SHA256      : u16 = 0xC080;
-pub const TLS_DHE_DSS_WITH_CAMELLIA_256_GCM_SHA384      : u16 = 0xC081;
-pub const TLS_DH_DSS_WITH_CAMELLIA_128_GCM_SHA256       : u16 = 0xC082;
-pub const TLS_DH_DSS_WITH_CAMELLIA_256_GCM_SHA384       : u16 = 0xC083;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_CAMELLIA_128_GCM_SHA256      : u16 = 0xC084;
-#[allow(non_upper_case_globals)]
-pub const TLS_DH_anon_WITH_CAMELLIA_256_GCM_SHA384      : u16 = 0xC085;
-pub const TLS_ECDHE_ECDSA_WITH_CAMELLIA_128_GCM_SHA256  : u16 = 0xC086;
-pub const TLS_ECDHE_ECDSA_WITH_CAMELLIA_256_GCM_SHA384  : u16 = 0xC087;
-pub const TLS_ECDH_ECDSA_WITH_CAMELLIA_128_GCM_SHA256   : u16 = 0xC088;
-pub const TLS_ECDH_ECDSA_WITH_CAMELLIA_256_GCM_SHA384   : u16 = 0xC089;
-pub const TLS_ECDHE_RSA_WITH_CAMELLIA_128_GCM_SHA256    : u16 = 0xC08A;
-pub const TLS_ECDHE_RSA_WITH_CAMELLIA_256_GCM_SHA384    : u16 = 0xC08B;
-pub const TLS_ECDH_RSA_WITH_CAMELLIA_128_GCM_SHA256     : u16 = 0xC08C;
-pub const TLS_ECDH_RSA_WITH_CAMELLIA_256_GCM_SHA384     : u16 = 0xC08D;
-pub const TLS_PSK_WITH_CAMELLIA_128_GCM_SHA256          : u16 = 0xC08E;
-pub const TLS_PSK_WITH_CAMELLIA_256_GCM_SHA384          : u16 = 0xC08F;
-pub const TLS_DHE_PSK_WITH_CAMELLIA_128_GCM_SHA256      : u16 = 0xC090;
-pub const TLS_DHE_PSK_WITH_CAMELLIA_256_GCM_SHA384      : u16 = 0xC091;
-pub const TLS_RSA_PSK_WITH_CAMELLIA_128_GCM_SHA256      : u16 = 0xC092;
-pub const TLS_RSA_PSK_WITH_CAMELLIA_256_GCM_SHA384      : u16 = 0xC093;
-pub const TLS_PSK_WITH_CAMELLIA_128_CBC_SHA256          : u16 = 0xC094;
-pub const TLS_PSK_WITH_CAMELLIA_256_CBC_SHA384          : u16 = 0xC095;
-pub const TLS_DHE_PSK_WITH_CAMELLIA_128_CBC_SHA256      : u16 = 0xC096;
-pub const TLS_DHE_PSK_WITH_CAMELLIA_256_CBC_SHA384      : u16 = 0xC097;
-pub const TLS_RSA_PSK_WITH_CAMELLIA_128_CBC_SHA256      : u16 = 0xC098;
-pub const TLS_RSA_PSK_WITH_CAMELLIA_256_CBC_SHA384      : u16 = 0xC099;
-pub const TLS_ECDHE_PSK_WITH_CAMELLIA_128_CBC_SHA256    : u16 = 0xC09A;
-pub const TLS_ECDHE_PSK_WITH_CAMELLIA_256_CBC_SHA384    : u16 = 0xC09B;
-pub const TLS_RSA_WITH_AES_128_CCM                      : u16 = 0xC09C;
-pub const TLS_RSA_WITH_AES_256_CCM                      : u16 = 0xC09D;
-pub const TLS_DHE_RSA_WITH_AES_128_CCM                  : u16 = 0xC09E;
-pub const TLS_DHE_RSA_WITH_AES_256_CCM                  : u16 = 0xC09F;
-pub const TLS_RSA_WITH_AES_128_CCM_8                    : u16 = 0xC0A0;
-pub const TLS_RSA_WITH_AES_256_CCM_8                    : u16 = 0xC0A1;
-pub const TLS_DHE_RSA_WITH_AES_128_CCM_8                : u16 = 0xC0A2;
-pub const TLS_DHE_RSA_WITH_AES_256_CCM_8                : u16 = 0xC0A3;
-pub const TLS_PSK_WITH_AES_128_CCM                      : u16 = 0xC0A4;
-pub const TLS_PSK_WITH_AES_256_CCM                      : u16 = 0xC0A5;
-pub const TLS_DHE_PSK_WITH_AES_128_CCM                  : u16 = 0xC0A6;
-pub const TLS_DHE_PSK_WITH_AES_256_CCM                  : u16 = 0xC0A7;
-pub const TLS_PSK_WITH_AES_128_CCM_8                    : u16 = 0xC0A8;
-pub const TLS_PSK_WITH_AES_256_CCM_8                    : u16 = 0xC0A9;
-pub const TLS_PSK_DHE_WITH_AES_128_CCM_8                : u16 = 0xC0AA;
-pub const TLS_PSK_DHE_WITH_AES_256_CCM_8                : u16 = 0xC0AB;
-pub const TLS_ECDHE_ECDSA_WITH_AES_128_CCM              : u16 = 0xC0AC;
-pub const TLS_ECDHE_ECDSA_WITH_AES_256_CCM              : u16 = 0xC0AD;
-pub const TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8            : u16 = 0xC0AE;
-pub const TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8            : u16 = 0xC0AF;
-pub const TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256   : u16 = 0xCCA8;
-pub const TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 : u16 = 0xCCA9;
-pub const TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256     : u16 = 0xCCAA;
-pub const TLS_PSK_WITH_CHACHA20_POLY1305_SHA256         : u16 = 0xCCAB;
-pub const TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256   : u16 = 0xCCAC;
-pub const TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256     : u16 = 0xCCAD;
-pub const TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256     : u16 = 0xCCAE;
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+enum CipherSuite {
+    TlsNullWithNullNull                     = 0x0000,
+    TlsRsaWithNullMd5                       = 0x0001,
+    TlsRsaWithNullSha                       = 0x0002,
+    TlsRsaExportWithRc440Md5                = 0x0003,
+    TlsRsaWithRc4128Md5                     = 0x0004,
+    TlsRsaWithRc4128Sha                     = 0x0005,
+    TlsRsaExportWithRc2Cbc40Md5             = 0x0006,
+    TlsRsaWithIdeaCbcSha                    = 0x0007,
+    TlsRsaExportWithDes40CbcSha             = 0x0008,
+    TlsRsaWithDesCbcSha                     = 0x0009,
+    TlsRsaWith3desEdeCbcSha                 = 0x000A,
+    TlsDhDssExportWithDes40CbcSha           = 0x000B,
+    TlsDhDssWithDesCbcSha                   = 0x000C,
+    TlsDhDssWith3desEdeCbcSha               = 0x000D,
+    TlsDhRsaExportWithDes40CbcSha           = 0x000E,
+    TlsDhRsaWithDesCbcSha                   = 0x000F,
+    TlsDhRsaWith3desEdeCbcSha               = 0x0010,
+    TlsDheDssExportWithDes40CbcSha          = 0x0011,
+    TlsDheDssWithDesCbcSha                  = 0x0012,
+    TlsDheDssWith3desEdeCbcSha              = 0x0013,
+    TlsDheRsaExportWithDes40CbcSha          = 0x0014,
+    TlsDheRsaWithDesCbcSha                  = 0x0015,
+    TlsDheRsaWith3desEdeCbcSha              = 0x0016,
+    TlsDhAnonExportWithRc440Md5             = 0x0017,
+    TlsDhAnonWithRc4128Md5                  = 0x0018,
+    TlsDhAnonExportWithDes40CbcSha          = 0x0019,
+    TlsDhAnonWithDesCbcSha                  = 0x001A,
+    TlsDhAnonWith3desEdeCbcSha              = 0x001B,
+    TlsKrb5WithDesCbcSha                    = 0x001E,
+    TlsKrb5With3desEdeCbcSha                = 0x001F,
+    TlsKrb5WithRc4128Sha                    = 0x0020,
+    TlsKrb5WithIdeaCbcSha                   = 0x0021,
+    TlsKrb5WithDesCbcMd5                    = 0x0022,
+    TlsKrb5With3desEdeCbcMd5                = 0x0023,
+    TlsKrb5WithRc4128Md5                    = 0x0024,
+    TlsKrb5WithIdeaCbcMd5                   = 0x0025,
+    TlsKrb5ExportWithDesCbc40Sha            = 0x0026,
+    TlsKrb5ExportWithRc2Cbc40Sha            = 0x0027,
+    TlsKrb5ExportWithRc440Sha               = 0x0028,
+    TlsKrb5ExportWithDesCbc40Md5            = 0x0029,
+    TlsKrb5ExportWithRc2Cbc40Md5            = 0x002A,
+    TlsKrb5ExportWithRc440Md5               = 0x002B,
+    TlsPskWithNullSha                       = 0x002C,
+    TlsDhePskWithNullSha                    = 0x002D,
+    TlsRsaPskWithNullSha                    = 0x002E,
+    TlsRsaWithAes128CbcSha                  = 0x002F,
+    TlsDhDssWithAes128CbcSha                = 0x0030,
+    TlsDhRsaWithAes128CbcSha                = 0x0031,
+    TlsDheDssWithAes128CbcSha               = 0x0032,
+    TlsDheRsaWithAes128CbcSha               = 0x0033,
+    TlsDhAnonWithAes128CbcSha               = 0x0034,
+    TlsRsaWithAes256CbcSha                  = 0x0035,
+    TlsDhDssWithAes256CbcSha                = 0x0036,
+    TlsDhRsaWithAes256CbcSha                = 0x0037,
+    TlsDheDssWithAes256CbcSha               = 0x0038,
+    TlsDheRsaWithAes256CbcSha               = 0x0039,
+    TlsDhAnonWithAes256CbcSha               = 0x003A,
+    TlsRsaWithNullSha256                    = 0x003B,
+    TlsRsaWithAes128CbcSha256               = 0x003C,
+    TlsRsaWithAes256CbcSha256               = 0x003D,
+    TlsDhDssWithAes128CbcSha256             = 0x003E,
+    TlsDhRsaWithAes128CbcSha256             = 0x003F,
+    TlsDheDssWithAes128CbcSha256            = 0x0040,
+    TlsRsaWithCamellia128CbcSha             = 0x0041,
+    TlsDhDssWithCamellia128CbcSha           = 0x0042,
+    TlsDhRsaWithCamellia128CbcSha           = 0x0043,
+    TlsDheDssWithCamellia128CbcSha          = 0x0044,
+    TlsDheRsaWithCamellia128CbcSha          = 0x0045,
+    TlsDhAnonWithCamellia128CbcSha          = 0x0046,
+    TlsDheRsaWithAes128CbcSha256            = 0x0067,
+    TlsDhDssWithAes256CbcSha256             = 0x0068,
+    TlsDhRsaWithAes256CbcSha256             = 0x0069,
+    TlsDheDssWithAes256CbcSha256            = 0x006A,
+    TlsDheRsaWithAes256CbcSha256            = 0x006B,
+    TlsDhAnonWithAes128CbcSha256            = 0x006C,
+    TlsDhAnonWithAes256CbcSha256            = 0x006D,
+    TlsRsaWithCamellia256CbcSha             = 0x0084,
+    TlsDhDssWithCamellia256CbcSha           = 0x0085,
+    TlsDhRsaWithCamellia256CbcSha           = 0x0086,
+    TlsDheDssWithCamellia256CbcSha          = 0x0087,
+    TlsDheRsaWithCamellia256CbcSha          = 0x0088,
+    TlsDhAnonWithCamellia256CbcSha          = 0x0089,
+    TlsPskWithRc4128Sha                     = 0x008A,
+    TlsPskWith3desEdeCbcSha                 = 0x008B,
+    TlsPskWithAes128CbcSha                  = 0x008C,
+    TlsPskWithAes256CbcSha                  = 0x008D,
+    TlsDhePskWithRc4128Sha                  = 0x008E,
+    TlsDhePskWith3desEdeCbcSha              = 0x008F,
+    TlsDhePskWithAes128CbcSha               = 0x0090,
+    TlsDhePskWithAes256CbcSha               = 0x0091,
+    TlsRsaPskWithRc4128Sha                  = 0x0092,
+    TlsRsaPskWith3desEdeCbcSha              = 0x0093,
+    TlsRsaPskWithAes128CbcSha               = 0x0094,
+    TlsRsaPskWithAes256CbcSha               = 0x0095,
+    TlsRsaWithSeedCbcSha                    = 0x0096,
+    TlsDhDssWithSeedCbcSha                  = 0x0097,
+    TlsDhRsaWithSeedCbcSha                  = 0x0098,
+    TlsDheDssWithSeedCbcSha                 = 0x0099,
+    TlsDheRsaWithSeedCbcSha                 = 0x009A,
+    TlsDhAnonWithSeedCbcSha                 = 0x009B,
+    TlsRsaWithAes128GcmSha256               = 0x009C,
+    TlsRsaWithAes256GcmSha384               = 0x009D,
+    TlsDheRsaWithAes128GcmSha256            = 0x009E,
+    TlsDheRsaWithAes256GcmSha384            = 0x009F,
+    TlsDhRsaWithAes128GcmSha256             = 0x00A0,
+    TlsDhRsaWithAes256GcmSha384             = 0x00A1,
+    TlsDheDssWithAes128GcmSha256            = 0x00A2,
+    TlsDheDssWithAes256GcmSha384            = 0x00A3,
+    TlsDhDssWithAes128GcmSha256             = 0x00A4,
+    TlsDhDssWithAes256GcmSha384             = 0x00A5,
+    TlsDhAnonWithAes128GcmSha256            = 0x00A6,
+    TlsDhAnonWithAes256GcmSha384            = 0x00A7,
+    TlsPskWithAes128GcmSha256               = 0x00A8,
+    TlsPskWithAes256GcmSha384               = 0x00A9,
+    TlsDhePskWithAes128GcmSha256            = 0x00AA,
+    TlsDhePskWithAes256GcmSha384            = 0x00AB,
+    TlsRsaPskWithAes128GcmSha256            = 0x00AC,
+    TlsRsaPskWithAes256GcmSha384            = 0x00AD,
+    TlsPskWithAes128CbcSha256               = 0x00AE,
+    TlsPskWithAes256CbcSha384               = 0x00AF,
+    TlsPskWithNullSha256                    = 0x00B0,
+    TlsPskWithNullSha384                    = 0x00B1,
+    TlsDhePskWithAes128CbcSha256            = 0x00B2,
+    TlsDhePskWithAes256CbcSha384            = 0x00B3,
+    TlsDhePskWithNullSha256                 = 0x00B4,
+    TlsDhePskWithNullSha384                 = 0x00B5,
+    TlsRsaPskWithAes128CbcSha256            = 0x00B6,
+    TlsRsaPskWithAes256CbcSha384            = 0x00B7,
+    TlsRsaPskWithNullSha256                 = 0x00B8,
+    TlsRsaPskWithNullSha384                 = 0x00B9,
+    TlsRsaWithCamellia128CbcSha256          = 0x00BA,
+    TlsDhDssWithCamellia128CbcSha256        = 0x00BB,
+    TlsDhRsaWithCamellia128CbcSha256        = 0x00BC,
+    TlsDheDssWithCamellia128CbcSha256       = 0x00BD,
+    TlsDheRsaWithCamellia128CbcSha256       = 0x00BE,
+    TlsDhAnonWithCamellia128CbcSha256       = 0x00BF,
+    TlsRsaWithCamellia256CbcSha256          = 0x00C0,
+    TlsDhDssWithCamellia256CbcSha256        = 0x00C1,
+    TlsDhRsaWithCamellia256CbcSha256        = 0x00C2,
+    TlsDheDssWithCamellia256CbcSha256       = 0x00C3,
+    TlsDheRsaWithCamellia256CbcSha256       = 0x00C4,
+    TlsDhAnonWithCamellia256CbcSha256       = 0x00C5,
+    TlsEmptyRenegotiationInfoScsv           = 0x00FF,
+    TlsFallbackScsv                         = 0x5600,
+    TlsEcdhEcdsaWithNullSha                 = 0xC001,
+    TlsEcdhEcdsaWithRc4128Sha               = 0xC002,
+    TlsEcdhEcdsaWith3desEdeCbcSha           = 0xC003,
+    TlsEcdhEcdsaWithAes128CbcSha            = 0xC004,
+    TlsEcdhEcdsaWithAes256CbcSha            = 0xC005,
+    TlsEcdheEcdsaWithNullSha                = 0xC006,
+    TlsEcdheEcdsaWithRc4128Sha              = 0xC007,
+    TlsEcdheEcdsaWith3desEdeCbcSha          = 0xC008,
+    TlsEcdheEcdsaWithAes128CbcSha           = 0xC009,
+    TlsEcdheEcdsaWithAes256CbcSha           = 0xC00A,
+    TlsEcdhRsaWithNullSha                   = 0xC00B,
+    TlsEcdhRsaWithRc4128Sha                 = 0xC00C,
+    TlsEcdhRsaWith3desEdeCbcSha             = 0xC00D,
+    TlsEcdhRsaWithAes128CbcSha              = 0xC00E,
+    TlsEcdhRsaWithAes256CbcSha              = 0xC00F,
+    TlsEcdheRsaWithNullSha                  = 0xC010,
+    TlsEcdheRsaWithRc4128Sha                = 0xC011,
+    TlsEcdheRsaWith3desEdeCbcSha            = 0xC012,
+    TlsEcdheRsaWithAes128CbcSha             = 0xC013,
+    TlsEcdheRsaWithAes256CbcSha             = 0xC014,
+    TlsEcdhAnonWithNullSha                  = 0xC015,
+    TlsEcdhAnonWithRc4128Sha                = 0xC016,
+    TlsEcdhAnonWith3desEdeCbcSha            = 0xC017,
+    TlsEcdhAnonWithAes128CbcSha             = 0xC018,
+    TlsEcdhAnonWithAes256CbcSha             = 0xC019,
+    TlsSrpShaWith3desEdeCbcSha              = 0xC01A,
+    TlsSrpShaRsaWith3desEdeCbcSha           = 0xC01B,
+    TlsSrpShaDssWith3desEdeCbcSha           = 0xC01C,
+    TlsSrpShaWithAes128CbcSha               = 0xC01D,
+    TlsSrpShaRsaWithAes128CbcSha            = 0xC01E,
+    TlsSrpShaDssWithAes128CbcSha            = 0xC01F,
+    TlsSrpShaWithAes256CbcSha               = 0xC020,
+    TlsSrpShaRsaWithAes256CbcSha            = 0xC021,
+    TlsSrpShaDssWithAes256CbcSha            = 0xC022,
+    TlsEcdheEcdsaWithAes128CbcSha256        = 0xC023,
+    TlsEcdheEcdsaWithAes256CbcSha384        = 0xC024,
+    TlsEcdhEcdsaWithAes128CbcSha256         = 0xC025,
+    TlsEcdhEcdsaWithAes256CbcSha384         = 0xC026,
+    TlsEcdheRsaWithAes128CbcSha256          = 0xC027,
+    TlsEcdheRsaWithAes256CbcSha384          = 0xC028,
+    TlsEcdhRsaWithAes128CbcSha256           = 0xC029,
+    TlsEcdhRsaWithAes256CbcSha384           = 0xC02A,
+    TlsEcdheEcdsaWithAes128GcmSha256        = 0xC02B,
+    TlsEcdheEcdsaWithAes256GcmSha384        = 0xC02C,
+    TlsEcdhEcdsaWithAes128GcmSha256         = 0xC02D,
+    TlsEcdhEcdsaWithAes256GcmSha384         = 0xC02E,
+    TlsEcdheRsaWithAes128GcmSha256          = 0xC02F,
+    TlsEcdheRsaWithAes256GcmSha384          = 0xC030,
+    TlsEcdhRsaWithAes128GcmSha256           = 0xC031,
+    TlsEcdhRsaWithAes256GcmSha384           = 0xC032,
+    TlsEcdhePskWithRc4128Sha                = 0xC033,
+    TlsEcdhePskWith3desEdeCbcSha            = 0xC034,
+    TlsEcdhePskWithAes128CbcSha             = 0xC035,
+    TlsEcdhePskWithAes256CbcSha             = 0xC036,
+    TlsEcdhePskWithAes128CbcSha256          = 0xC037,
+    TlsEcdhePskWithAes256CbcSha384          = 0xC038,
+    TlsEcdhePskWithNullSha                  = 0xC039,
+    TlsEcdhePskWithNullSha256               = 0xC03A,
+    TlsEcdhePskWithNullSha384               = 0xC03B,
+    TlsRsaWithAria128CbcSha256              = 0xC03C,
+    TlsRsaWithAria256CbcSha384              = 0xC03D,
+    TlsDhDssWithAria128CbcSha256            = 0xC03E,
+    TlsDhDssWithAria256CbcSha384            = 0xC03F,
+    TlsDhRsaWithAria128CbcSha256            = 0xC040,
+    TlsDhRsaWithAria256CbcSha384            = 0xC041,
+    TlsDheDssWithAria128CbcSha256           = 0xC042,
+    TlsDheDssWithAria256CbcSha384           = 0xC043,
+    TlsDheRsaWithAria128CbcSha256           = 0xC044,
+    TlsDheRsaWithAria256CbcSha384           = 0xC045,
+    TlsDhAnonWithAria128CbcSha256           = 0xC046,
+    TlsDhAnonWithAria256CbcSha384           = 0xC047,
+    TlsEcdheEcdsaWithAria128CbcSha256       = 0xC048,
+    TlsEcdheEcdsaWithAria256CbcSha384       = 0xC049,
+    TlsEcdhEcdsaWithAria128CbcSha256        = 0xC04A,
+    TlsEcdhEcdsaWithAria256CbcSha384        = 0xC04B,
+    TlsEcdheRsaWithAria128CbcSha256         = 0xC04C,
+    TlsEcdheRsaWithAria256CbcSha384         = 0xC04D,
+    TlsEcdhRsaWithAria128CbcSha256          = 0xC04E,
+    TlsEcdhRsaWithAria256CbcSha384          = 0xC04F,
+    TlsRsaWithAria128GcmSha256              = 0xC050,
+    TlsRsaWithAria256GcmSha384              = 0xC051,
+    TlsDheRsaWithAria128GcmSha256           = 0xC052,
+    TlsDheRsaWithAria256GcmSha384           = 0xC053,
+    TlsDhRsaWithAria128GcmSha256            = 0xC054,
+    TlsDhRsaWithAria256GcmSha384            = 0xC055,
+    TlsDheDssWithAria128GcmSha256           = 0xC056,
+    TlsDheDssWithAria256GcmSha384           = 0xC057,
+    TlsDhDssWithAria128GcmSha256            = 0xC058,
+    TlsDhDssWithAria256GcmSha384            = 0xC059,
+    TlsDhAnonWithAria128GcmSha256           = 0xC05A,
+    TlsDhAnonWithAria256GcmSha384           = 0xC05B,
+    TlsEcdheEcdsaWithAria128GcmSha256       = 0xC05C,
+    TlsEcdheEcdsaWithAria256GcmSha384       = 0xC05D,
+    TlsEcdhEcdsaWithAria128GcmSha256        = 0xC05E,
+    TlsEcdhEcdsaWithAria256GcmSha384        = 0xC05F,
+    TlsEcdheRsaWithAria128GcmSha256         = 0xC060,
+    TlsEcdheRsaWithAria256GcmSha384         = 0xC061,
+    TlsEcdhRsaWithAria128GcmSha256          = 0xC062,
+    TlsEcdhRsaWithAria256GcmSha384          = 0xC063,
+    TlsPskWithAria128CbcSha256              = 0xC064,
+    TlsPskWithAria256CbcSha384              = 0xC065,
+    TlsDhePskWithAria128CbcSha256           = 0xC066,
+    TlsDhePskWithAria256CbcSha384           = 0xC067,
+    TlsRsaPskWithAria128CbcSha256           = 0xC068,
+    TlsRsaPskWithAria256CbcSha384           = 0xC069,
+    TlsPskWithAria128GcmSha256              = 0xC06A,
+    TlsPskWithAria256GcmSha384              = 0xC06B,
+    TlsDhePskWithAria128GcmSha256           = 0xC06C,
+    TlsDhePskWithAria256GcmSha384           = 0xC06D,
+    TlsRsaPskWithAria128GcmSha256           = 0xC06E,
+    TlsRsaPskWithAria256GcmSha384           = 0xC06F,
+    TlsEcdhePskWithAria128CbcSha256         = 0xC070,
+    TlsEcdhePskWithAria256CbcSha384         = 0xC071,
+    TlsEcdheEcdsaWithCamellia128CbcSha256   = 0xC072,
+    TlsEcdheEcdsaWithCamellia256CbcSha384   = 0xC073,
+    TlsEcdhEcdsaWithCamellia128CbcSha256    = 0xC074,
+    TlsEcdhEcdsaWithCamellia256CbcSha384    = 0xC075,
+    TlsEcdheRsaWithCamellia128CbcSha256     = 0xC076,
+    TlsEcdheRsaWithCamellia256CbcSha384     = 0xC077,
+    TlsEcdhRsaWithCamellia128CbcSha256      = 0xC078,
+    TlsEcdhRsaWithCamellia256CbcSha384      = 0xC079,
+    TlsRsaWithCamellia128GcmSha256          = 0xC07A,
+    TlsRsaWithCamellia256GcmSha384          = 0xC07B,
+    TlsDheRsaWithCamellia128GcmSha256       = 0xC07C,
+    TlsDheRsaWithCamellia256GcmSha384       = 0xC07D,
+    TlsDhRsaWithCamellia128GcmSha256        = 0xC07E,
+    TlsDhRsaWithCamellia256GcmSha384        = 0xC07F,
+    TlsDheDssWithCamellia128GcmSha256       = 0xC080,
+    TlsDheDssWithCamellia256GcmSha384       = 0xC081,
+    TlsDhDssWithCamellia128GcmSha256        = 0xC082,
+    TlsDhDssWithCamellia256GcmSha384        = 0xC083,
+    TlsDhAnonWithCamellia128GcmSha256       = 0xC084,
+    TlsDhAnonWithCamellia256GcmSha384       = 0xC085,
+    TlsEcdheEcdsaWithCamellia128GcmSha256   = 0xC086,
+    TlsEcdheEcdsaWithCamellia256GcmSha384   = 0xC087,
+    TlsEcdhEcdsaWithCamellia128GcmSha256    = 0xC088,
+    TlsEcdhEcdsaWithCamellia256GcmSha384    = 0xC089,
+    TlsEcdheRsaWithCamellia128GcmSha256     = 0xC08A,
+    TlsEcdheRsaWithCamellia256GcmSha384     = 0xC08B,
+    TlsEcdhRsaWithCamellia128GcmSha256      = 0xC08C,
+    TlsEcdhRsaWithCamellia256GcmSha384      = 0xC08D,
+    TlsPskWithCamellia128GcmSha256          = 0xC08E,
+    TlsPskWithCamellia256GcmSha384          = 0xC08F,
+    TlsDhePskWithCamellia128GcmSha256       = 0xC090,
+    TlsDhePskWithCamellia256GcmSha384       = 0xC091,
+    TlsRsaPskWithCamellia128GcmSha256       = 0xC092,
+    TlsRsaPskWithCamellia256GcmSha384       = 0xC093,
+    TlsPskWithCamellia128CbcSha256          = 0xC094,
+    TlsPskWithCamellia256CbcSha384          = 0xC095,
+    TlsDhePskWithCamellia128CbcSha256       = 0xC096,
+    TlsDhePskWithCamellia256CbcSha384       = 0xC097,
+    TlsRsaPskWithCamellia128CbcSha256       = 0xC098,
+    TlsRsaPskWithCamellia256CbcSha384       = 0xC099,
+    TlsEcdhePskWithCamellia128CbcSha256     = 0xC09A,
+    TlsEcdhePskWithCamellia256CbcSha384     = 0xC09B,
+    TlsRsaWithAes128Ccm                     = 0xC09C,
+    TlsRsaWithAes256Ccm                     = 0xC09D,
+    TlsDheRsaWithAes128Ccm                  = 0xC09E,
+    TlsDheRsaWithAes256Ccm                  = 0xC09F,
+    TlsRsaWithAes128Ccm8                    = 0xC0A0,
+    TlsRsaWithAes256Ccm8                    = 0xC0A1,
+    TlsDheRsaWithAes128Ccm8                 = 0xC0A2,
+    TlsDheRsaWithAes256Ccm8                 = 0xC0A3,
+    TlsPskWithAes128Ccm                     = 0xC0A4,
+    TlsPskWithAes256Ccm                     = 0xC0A5,
+    TlsDhePskWithAes128Ccm                  = 0xC0A6,
+    TlsDhePskWithAes256Ccm                  = 0xC0A7,
+    TlsPskWithAes128Ccm8                    = 0xC0A8,
+    TlsPskWithAes256Ccm8                    = 0xC0A9,
+    TlsPskDheWithAes128Ccm8                 = 0xC0AA,
+    TlsPskDheWithAes256Ccm8                 = 0xC0AB,
+    TlsEcdheEcdsaWithAes128Ccm              = 0xC0AC,
+    TlsEcdheEcdsaWithAes256Ccm              = 0xC0AD,
+    TlsEcdheEcdsaWithAes128Ccm8             = 0xC0AE,
+    TlsEcdheEcdsaWithAes256Ccm8             = 0xC0AF,
+    TlsEcdheRsaWithChacha20Poly1305Sha256   = 0xCCA8,
+    TlsEcdheEcdsaWithChacha20Poly1305Sha256 = 0xCCA9,
+    TlsDheRsaWithChacha20Poly1305Sha256     = 0xCCAA,
+    TlsPskWithChacha20Poly1305Sha256        = 0xCCAB,
+    TlsEcdhePskWithChacha20Poly1305Sha256   = 0xCCAC,
+    TlsDhePskWithChacha20Poly1305Sha256     = 0xCCAD,
+    TlsRsaPskWithChacha20Poly1305Sha256     = 0xCCAE,
+}
+
+const CIPHER_SUITE_LIST : [CipherSuite; 326] = [
+    CipherSuite::TlsNullWithNullNull,
+    CipherSuite::TlsRsaWithNullMd5,
+    CipherSuite::TlsRsaWithNullSha,
+    CipherSuite::TlsRsaExportWithRc440Md5,
+    CipherSuite::TlsRsaWithRc4128Md5,
+    CipherSuite::TlsRsaWithRc4128Sha,
+    CipherSuite::TlsRsaExportWithRc2Cbc40Md5,
+    CipherSuite::TlsRsaWithIdeaCbcSha,
+    CipherSuite::TlsRsaExportWithDes40CbcSha,
+    CipherSuite::TlsRsaWithDesCbcSha,
+    CipherSuite::TlsRsaWith3desEdeCbcSha,
+    CipherSuite::TlsDhDssExportWithDes40CbcSha,
+    CipherSuite::TlsDhDssWithDesCbcSha,
+    CipherSuite::TlsDhDssWith3desEdeCbcSha,
+    CipherSuite::TlsDhRsaExportWithDes40CbcSha,
+    CipherSuite::TlsDhRsaWithDesCbcSha,
+    CipherSuite::TlsDhRsaWith3desEdeCbcSha,
+    CipherSuite::TlsDheDssExportWithDes40CbcSha,
+    CipherSuite::TlsDheDssWithDesCbcSha,
+    CipherSuite::TlsDheDssWith3desEdeCbcSha,
+    CipherSuite::TlsDheRsaExportWithDes40CbcSha,
+    CipherSuite::TlsDheRsaWithDesCbcSha,
+    CipherSuite::TlsDheRsaWith3desEdeCbcSha,
+    CipherSuite::TlsDhAnonExportWithRc440Md5,
+    CipherSuite::TlsDhAnonWithRc4128Md5,
+    CipherSuite::TlsDhAnonExportWithDes40CbcSha,
+    CipherSuite::TlsDhAnonWithDesCbcSha,
+    CipherSuite::TlsDhAnonWith3desEdeCbcSha,
+    CipherSuite::TlsKrb5WithDesCbcSha,
+    CipherSuite::TlsKrb5With3desEdeCbcSha,
+    CipherSuite::TlsKrb5WithRc4128Sha,
+    CipherSuite::TlsKrb5WithIdeaCbcSha,
+    CipherSuite::TlsKrb5WithDesCbcMd5,
+    CipherSuite::TlsKrb5With3desEdeCbcMd5,
+    CipherSuite::TlsKrb5WithRc4128Md5,
+    CipherSuite::TlsKrb5WithIdeaCbcMd5,
+    CipherSuite::TlsKrb5ExportWithDesCbc40Sha,
+    CipherSuite::TlsKrb5ExportWithRc2Cbc40Sha,
+    CipherSuite::TlsKrb5ExportWithRc440Sha,
+    CipherSuite::TlsKrb5ExportWithDesCbc40Md5,
+    CipherSuite::TlsKrb5ExportWithRc2Cbc40Md5,
+    CipherSuite::TlsKrb5ExportWithRc440Md5,
+    CipherSuite::TlsPskWithNullSha,
+    CipherSuite::TlsDhePskWithNullSha,
+    CipherSuite::TlsRsaPskWithNullSha,
+    CipherSuite::TlsRsaWithAes128CbcSha,
+    CipherSuite::TlsDhDssWithAes128CbcSha,
+    CipherSuite::TlsDhRsaWithAes128CbcSha,
+    CipherSuite::TlsDheDssWithAes128CbcSha,
+    CipherSuite::TlsDheRsaWithAes128CbcSha,
+    CipherSuite::TlsDhAnonWithAes128CbcSha,
+    CipherSuite::TlsRsaWithAes256CbcSha,
+    CipherSuite::TlsDhDssWithAes256CbcSha,
+    CipherSuite::TlsDhRsaWithAes256CbcSha,
+    CipherSuite::TlsDheDssWithAes256CbcSha,
+    CipherSuite::TlsDheRsaWithAes256CbcSha,
+    CipherSuite::TlsDhAnonWithAes256CbcSha,
+    CipherSuite::TlsRsaWithNullSha256,
+    CipherSuite::TlsRsaWithAes128CbcSha256,
+    CipherSuite::TlsRsaWithAes256CbcSha256,
+    CipherSuite::TlsDhDssWithAes128CbcSha256,
+    CipherSuite::TlsDhRsaWithAes128CbcSha256,
+    CipherSuite::TlsDheDssWithAes128CbcSha256,
+    CipherSuite::TlsRsaWithCamellia128CbcSha,
+    CipherSuite::TlsDhDssWithCamellia128CbcSha,
+    CipherSuite::TlsDhRsaWithCamellia128CbcSha,
+    CipherSuite::TlsDheDssWithCamellia128CbcSha,
+    CipherSuite::TlsDheRsaWithCamellia128CbcSha,
+    CipherSuite::TlsDhAnonWithCamellia128CbcSha,
+    CipherSuite::TlsDheRsaWithAes128CbcSha256,
+    CipherSuite::TlsDhDssWithAes256CbcSha256,
+    CipherSuite::TlsDhRsaWithAes256CbcSha256,
+    CipherSuite::TlsDheDssWithAes256CbcSha256,
+    CipherSuite::TlsDheRsaWithAes256CbcSha256,
+    CipherSuite::TlsDhAnonWithAes128CbcSha256,
+    CipherSuite::TlsDhAnonWithAes256CbcSha256,
+    CipherSuite::TlsRsaWithCamellia256CbcSha,
+    CipherSuite::TlsDhDssWithCamellia256CbcSha,
+    CipherSuite::TlsDhRsaWithCamellia256CbcSha,
+    CipherSuite::TlsDheDssWithCamellia256CbcSha,
+    CipherSuite::TlsDheRsaWithCamellia256CbcSha,
+    CipherSuite::TlsDhAnonWithCamellia256CbcSha,
+    CipherSuite::TlsPskWithRc4128Sha,
+    CipherSuite::TlsPskWith3desEdeCbcSha,
+    CipherSuite::TlsPskWithAes128CbcSha,
+    CipherSuite::TlsPskWithAes256CbcSha,
+    CipherSuite::TlsDhePskWithRc4128Sha,
+    CipherSuite::TlsDhePskWith3desEdeCbcSha,
+    CipherSuite::TlsDhePskWithAes128CbcSha,
+    CipherSuite::TlsDhePskWithAes256CbcSha,
+    CipherSuite::TlsRsaPskWithRc4128Sha,
+    CipherSuite::TlsRsaPskWith3desEdeCbcSha,
+    CipherSuite::TlsRsaPskWithAes128CbcSha,
+    CipherSuite::TlsRsaPskWithAes256CbcSha,
+    CipherSuite::TlsRsaWithSeedCbcSha,
+    CipherSuite::TlsDhDssWithSeedCbcSha,
+    CipherSuite::TlsDhRsaWithSeedCbcSha,
+    CipherSuite::TlsDheDssWithSeedCbcSha,
+    CipherSuite::TlsDheRsaWithSeedCbcSha,
+    CipherSuite::TlsDhAnonWithSeedCbcSha,
+    CipherSuite::TlsRsaWithAes128GcmSha256,
+    CipherSuite::TlsRsaWithAes256GcmSha384,
+    CipherSuite::TlsDheRsaWithAes128GcmSha256,
+    CipherSuite::TlsDheRsaWithAes256GcmSha384,
+    CipherSuite::TlsDhRsaWithAes128GcmSha256,
+    CipherSuite::TlsDhRsaWithAes256GcmSha384,
+    CipherSuite::TlsDheDssWithAes128GcmSha256,
+    CipherSuite::TlsDheDssWithAes256GcmSha384,
+    CipherSuite::TlsDhDssWithAes128GcmSha256,
+    CipherSuite::TlsDhDssWithAes256GcmSha384,
+    CipherSuite::TlsDhAnonWithAes128GcmSha256,
+    CipherSuite::TlsDhAnonWithAes256GcmSha384,
+    CipherSuite::TlsPskWithAes128GcmSha256,
+    CipherSuite::TlsPskWithAes256GcmSha384,
+    CipherSuite::TlsDhePskWithAes128GcmSha256,
+    CipherSuite::TlsDhePskWithAes256GcmSha384,
+    CipherSuite::TlsRsaPskWithAes128GcmSha256,
+    CipherSuite::TlsRsaPskWithAes256GcmSha384,
+    CipherSuite::TlsPskWithAes128CbcSha256,
+    CipherSuite::TlsPskWithAes256CbcSha384,
+    CipherSuite::TlsPskWithNullSha256,
+    CipherSuite::TlsPskWithNullSha384,
+    CipherSuite::TlsDhePskWithAes128CbcSha256,
+    CipherSuite::TlsDhePskWithAes256CbcSha384,
+    CipherSuite::TlsDhePskWithNullSha256,
+    CipherSuite::TlsDhePskWithNullSha384,
+    CipherSuite::TlsRsaPskWithAes128CbcSha256,
+    CipherSuite::TlsRsaPskWithAes256CbcSha384,
+    CipherSuite::TlsRsaPskWithNullSha256,
+    CipherSuite::TlsRsaPskWithNullSha384,
+    CipherSuite::TlsRsaWithCamellia128CbcSha256,
+    CipherSuite::TlsDhDssWithCamellia128CbcSha256,
+    CipherSuite::TlsDhRsaWithCamellia128CbcSha256,
+    CipherSuite::TlsDheDssWithCamellia128CbcSha256,
+    CipherSuite::TlsDheRsaWithCamellia128CbcSha256,
+    CipherSuite::TlsDhAnonWithCamellia128CbcSha256,
+    CipherSuite::TlsRsaWithCamellia256CbcSha256,
+    CipherSuite::TlsDhDssWithCamellia256CbcSha256,
+    CipherSuite::TlsDhRsaWithCamellia256CbcSha256,
+    CipherSuite::TlsDheDssWithCamellia256CbcSha256,
+    CipherSuite::TlsDheRsaWithCamellia256CbcSha256,
+    CipherSuite::TlsDhAnonWithCamellia256CbcSha256,
+    CipherSuite::TlsEmptyRenegotiationInfoScsv,
+    CipherSuite::TlsFallbackScsv,
+    CipherSuite::TlsEcdhEcdsaWithNullSha,
+    CipherSuite::TlsEcdhEcdsaWithRc4128Sha,
+    CipherSuite::TlsEcdhEcdsaWith3desEdeCbcSha,
+    CipherSuite::TlsEcdhEcdsaWithAes128CbcSha,
+    CipherSuite::TlsEcdhEcdsaWithAes256CbcSha,
+    CipherSuite::TlsEcdheEcdsaWithNullSha,
+    CipherSuite::TlsEcdheEcdsaWithRc4128Sha,
+    CipherSuite::TlsEcdheEcdsaWith3desEdeCbcSha,
+    CipherSuite::TlsEcdheEcdsaWithAes128CbcSha,
+    CipherSuite::TlsEcdheEcdsaWithAes256CbcSha,
+    CipherSuite::TlsEcdhRsaWithNullSha,
+    CipherSuite::TlsEcdhRsaWithRc4128Sha,
+    CipherSuite::TlsEcdhRsaWith3desEdeCbcSha,
+    CipherSuite::TlsEcdhRsaWithAes128CbcSha,
+    CipherSuite::TlsEcdhRsaWithAes256CbcSha,
+    CipherSuite::TlsEcdheRsaWithNullSha,
+    CipherSuite::TlsEcdheRsaWithRc4128Sha,
+    CipherSuite::TlsEcdheRsaWith3desEdeCbcSha,
+    CipherSuite::TlsEcdheRsaWithAes128CbcSha,
+    CipherSuite::TlsEcdheRsaWithAes256CbcSha,
+    CipherSuite::TlsEcdhAnonWithNullSha,
+    CipherSuite::TlsEcdhAnonWithRc4128Sha,
+    CipherSuite::TlsEcdhAnonWith3desEdeCbcSha,
+    CipherSuite::TlsEcdhAnonWithAes128CbcSha,
+    CipherSuite::TlsEcdhAnonWithAes256CbcSha,
+    CipherSuite::TlsSrpShaWith3desEdeCbcSha,
+    CipherSuite::TlsSrpShaRsaWith3desEdeCbcSha,
+    CipherSuite::TlsSrpShaDssWith3desEdeCbcSha,
+    CipherSuite::TlsSrpShaWithAes128CbcSha,
+    CipherSuite::TlsSrpShaRsaWithAes128CbcSha,
+    CipherSuite::TlsSrpShaDssWithAes128CbcSha,
+    CipherSuite::TlsSrpShaWithAes256CbcSha,
+    CipherSuite::TlsSrpShaRsaWithAes256CbcSha,
+    CipherSuite::TlsSrpShaDssWithAes256CbcSha,
+    CipherSuite::TlsEcdheEcdsaWithAes128CbcSha256,
+    CipherSuite::TlsEcdheEcdsaWithAes256CbcSha384,
+    CipherSuite::TlsEcdhEcdsaWithAes128CbcSha256,
+    CipherSuite::TlsEcdhEcdsaWithAes256CbcSha384,
+    CipherSuite::TlsEcdheRsaWithAes128CbcSha256,
+    CipherSuite::TlsEcdheRsaWithAes256CbcSha384,
+    CipherSuite::TlsEcdhRsaWithAes128CbcSha256,
+    CipherSuite::TlsEcdhRsaWithAes256CbcSha384,
+    CipherSuite::TlsEcdheEcdsaWithAes128GcmSha256,
+    CipherSuite::TlsEcdheEcdsaWithAes256GcmSha384,
+    CipherSuite::TlsEcdhEcdsaWithAes128GcmSha256,
+    CipherSuite::TlsEcdhEcdsaWithAes256GcmSha384,
+    CipherSuite::TlsEcdheRsaWithAes128GcmSha256,
+    CipherSuite::TlsEcdheRsaWithAes256GcmSha384,
+    CipherSuite::TlsEcdhRsaWithAes128GcmSha256,
+    CipherSuite::TlsEcdhRsaWithAes256GcmSha384,
+    CipherSuite::TlsEcdhePskWithRc4128Sha,
+    CipherSuite::TlsEcdhePskWith3desEdeCbcSha,
+    CipherSuite::TlsEcdhePskWithAes128CbcSha,
+    CipherSuite::TlsEcdhePskWithAes256CbcSha,
+    CipherSuite::TlsEcdhePskWithAes128CbcSha256,
+    CipherSuite::TlsEcdhePskWithAes256CbcSha384,
+    CipherSuite::TlsEcdhePskWithNullSha,
+    CipherSuite::TlsEcdhePskWithNullSha256,
+    CipherSuite::TlsEcdhePskWithNullSha384,
+    CipherSuite::TlsRsaWithAria128CbcSha256,
+    CipherSuite::TlsRsaWithAria256CbcSha384,
+    CipherSuite::TlsDhDssWithAria128CbcSha256,
+    CipherSuite::TlsDhDssWithAria256CbcSha384,
+    CipherSuite::TlsDhRsaWithAria128CbcSha256,
+    CipherSuite::TlsDhRsaWithAria256CbcSha384,
+    CipherSuite::TlsDheDssWithAria128CbcSha256,
+    CipherSuite::TlsDheDssWithAria256CbcSha384,
+    CipherSuite::TlsDheRsaWithAria128CbcSha256,
+    CipherSuite::TlsDheRsaWithAria256CbcSha384,
+    CipherSuite::TlsDhAnonWithAria128CbcSha256,
+    CipherSuite::TlsDhAnonWithAria256CbcSha384,
+    CipherSuite::TlsEcdheEcdsaWithAria128CbcSha256,
+    CipherSuite::TlsEcdheEcdsaWithAria256CbcSha384,
+    CipherSuite::TlsEcdhEcdsaWithAria128CbcSha256,
+    CipherSuite::TlsEcdhEcdsaWithAria256CbcSha384,
+    CipherSuite::TlsEcdheRsaWithAria128CbcSha256,
+    CipherSuite::TlsEcdheRsaWithAria256CbcSha384,
+    CipherSuite::TlsEcdhRsaWithAria128CbcSha256,
+    CipherSuite::TlsEcdhRsaWithAria256CbcSha384,
+    CipherSuite::TlsRsaWithAria128GcmSha256,
+    CipherSuite::TlsRsaWithAria256GcmSha384,
+    CipherSuite::TlsDheRsaWithAria128GcmSha256,
+    CipherSuite::TlsDheRsaWithAria256GcmSha384,
+    CipherSuite::TlsDhRsaWithAria128GcmSha256,
+    CipherSuite::TlsDhRsaWithAria256GcmSha384,
+    CipherSuite::TlsDheDssWithAria128GcmSha256,
+    CipherSuite::TlsDheDssWithAria256GcmSha384,
+    CipherSuite::TlsDhDssWithAria128GcmSha256,
+    CipherSuite::TlsDhDssWithAria256GcmSha384,
+    CipherSuite::TlsDhAnonWithAria128GcmSha256,
+    CipherSuite::TlsDhAnonWithAria256GcmSha384,
+    CipherSuite::TlsEcdheEcdsaWithAria128GcmSha256,
+    CipherSuite::TlsEcdheEcdsaWithAria256GcmSha384,
+    CipherSuite::TlsEcdhEcdsaWithAria128GcmSha256,
+    CipherSuite::TlsEcdhEcdsaWithAria256GcmSha384,
+    CipherSuite::TlsEcdheRsaWithAria128GcmSha256,
+    CipherSuite::TlsEcdheRsaWithAria256GcmSha384,
+    CipherSuite::TlsEcdhRsaWithAria128GcmSha256,
+    CipherSuite::TlsEcdhRsaWithAria256GcmSha384,
+    CipherSuite::TlsPskWithAria128CbcSha256,
+    CipherSuite::TlsPskWithAria256CbcSha384,
+    CipherSuite::TlsDhePskWithAria128CbcSha256,
+    CipherSuite::TlsDhePskWithAria256CbcSha384,
+    CipherSuite::TlsRsaPskWithAria128CbcSha256,
+    CipherSuite::TlsRsaPskWithAria256CbcSha384,
+    CipherSuite::TlsPskWithAria128GcmSha256,
+    CipherSuite::TlsPskWithAria256GcmSha384,
+    CipherSuite::TlsDhePskWithAria128GcmSha256,
+    CipherSuite::TlsDhePskWithAria256GcmSha384,
+    CipherSuite::TlsRsaPskWithAria128GcmSha256,
+    CipherSuite::TlsRsaPskWithAria256GcmSha384,
+    CipherSuite::TlsEcdhePskWithAria128CbcSha256,
+    CipherSuite::TlsEcdhePskWithAria256CbcSha384,
+    CipherSuite::TlsEcdheEcdsaWithCamellia128CbcSha256,
+    CipherSuite::TlsEcdheEcdsaWithCamellia256CbcSha384,
+    CipherSuite::TlsEcdhEcdsaWithCamellia128CbcSha256,
+    CipherSuite::TlsEcdhEcdsaWithCamellia256CbcSha384,
+    CipherSuite::TlsEcdheRsaWithCamellia128CbcSha256,
+    CipherSuite::TlsEcdheRsaWithCamellia256CbcSha384,
+    CipherSuite::TlsEcdhRsaWithCamellia128CbcSha256,
+    CipherSuite::TlsEcdhRsaWithCamellia256CbcSha384,
+    CipherSuite::TlsRsaWithCamellia128GcmSha256,
+    CipherSuite::TlsRsaWithCamellia256GcmSha384,
+    CipherSuite::TlsDheRsaWithCamellia128GcmSha256,
+    CipherSuite::TlsDheRsaWithCamellia256GcmSha384,
+    CipherSuite::TlsDhRsaWithCamellia128GcmSha256,
+    CipherSuite::TlsDhRsaWithCamellia256GcmSha384,
+    CipherSuite::TlsDheDssWithCamellia128GcmSha256,
+    CipherSuite::TlsDheDssWithCamellia256GcmSha384,
+    CipherSuite::TlsDhDssWithCamellia128GcmSha256,
+    CipherSuite::TlsDhDssWithCamellia256GcmSha384,
+    CipherSuite::TlsDhAnonWithCamellia128GcmSha256,
+    CipherSuite::TlsDhAnonWithCamellia256GcmSha384,
+    CipherSuite::TlsEcdheEcdsaWithCamellia128GcmSha256,
+    CipherSuite::TlsEcdheEcdsaWithCamellia256GcmSha384,
+    CipherSuite::TlsEcdhEcdsaWithCamellia128GcmSha256,
+    CipherSuite::TlsEcdhEcdsaWithCamellia256GcmSha384,
+    CipherSuite::TlsEcdheRsaWithCamellia128GcmSha256,
+    CipherSuite::TlsEcdheRsaWithCamellia256GcmSha384,
+    CipherSuite::TlsEcdhRsaWithCamellia128GcmSha256,
+    CipherSuite::TlsEcdhRsaWithCamellia256GcmSha384,
+    CipherSuite::TlsPskWithCamellia128GcmSha256,
+    CipherSuite::TlsPskWithCamellia256GcmSha384,
+    CipherSuite::TlsDhePskWithCamellia128GcmSha256,
+    CipherSuite::TlsDhePskWithCamellia256GcmSha384,
+    CipherSuite::TlsRsaPskWithCamellia128GcmSha256,
+    CipherSuite::TlsRsaPskWithCamellia256GcmSha384,
+    CipherSuite::TlsPskWithCamellia128CbcSha256,
+    CipherSuite::TlsPskWithCamellia256CbcSha384,
+    CipherSuite::TlsDhePskWithCamellia128CbcSha256,
+    CipherSuite::TlsDhePskWithCamellia256CbcSha384,
+    CipherSuite::TlsRsaPskWithCamellia128CbcSha256,
+    CipherSuite::TlsRsaPskWithCamellia256CbcSha384,
+    CipherSuite::TlsEcdhePskWithCamellia128CbcSha256,
+    CipherSuite::TlsEcdhePskWithCamellia256CbcSha384,
+    CipherSuite::TlsRsaWithAes128Ccm,
+    CipherSuite::TlsRsaWithAes256Ccm,
+    CipherSuite::TlsDheRsaWithAes128Ccm,
+    CipherSuite::TlsDheRsaWithAes256Ccm,
+    CipherSuite::TlsRsaWithAes128Ccm8,
+    CipherSuite::TlsRsaWithAes256Ccm8,
+    CipherSuite::TlsDheRsaWithAes128Ccm8,
+    CipherSuite::TlsDheRsaWithAes256Ccm8,
+    CipherSuite::TlsPskWithAes128Ccm,
+    CipherSuite::TlsPskWithAes256Ccm,
+    CipherSuite::TlsDhePskWithAes128Ccm,
+    CipherSuite::TlsDhePskWithAes256Ccm,
+    CipherSuite::TlsPskWithAes128Ccm8,
+    CipherSuite::TlsPskWithAes256Ccm8,
+    CipherSuite::TlsPskDheWithAes128Ccm8,
+    CipherSuite::TlsPskDheWithAes256Ccm8,
+    CipherSuite::TlsEcdheEcdsaWithAes128Ccm,
+    CipherSuite::TlsEcdheEcdsaWithAes256Ccm,
+    CipherSuite::TlsEcdheEcdsaWithAes128Ccm8,
+    CipherSuite::TlsEcdheEcdsaWithAes256Ccm8,
+    CipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256,
+    CipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256,
+    CipherSuite::TlsDheRsaWithChacha20Poly1305Sha256,
+    CipherSuite::TlsPskWithChacha20Poly1305Sha256,
+    CipherSuite::TlsEcdhePskWithChacha20Poly1305Sha256,
+    CipherSuite::TlsDhePskWithChacha20Poly1305Sha256,
+    CipherSuite::TlsRsaPskWithChacha20Poly1305Sha256,
+];
 
 #[test]
 fn foo() {
