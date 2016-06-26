@@ -3,42 +3,46 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
-#![allow(dead_code)] // TODO
-#![allow(unused_mut)] // TODO
-
 extern crate byteorder;
 extern crate time;
 extern crate rand;
 
+use misc::{LengthMarkR16, LengthMarkR24, LengthMarkW16, LengthMarkW24};
 use std::cmp;
 use std::io::{self,Read,Write,Seek,Cursor};
+use std::str;
 use self::byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
 
 pub struct TLSStream<S : Read + Write> {
     inner: S,
+    pending_security_parameters: SecurityParameters,
     record_read_buf: Vec<u8>,
     record_write_buf: Vec<u8>,
-    read_bufs: [Cursor<Vec<u8>>; 4],
-    write_bufs: [Cursor<Vec<u8>>; 4],
+    read_bufs: [Cursor<Vec<u8>>; 5],
+    write_bufs: [Cursor<Vec<u8>>; 5],
 }
 
 impl<S: Read + Write> TLSStream<S> {
     pub fn new(inner: S) -> TLSStream<S> {
-        let mut ret = TLSStream::<S> {
+        let ret = TLSStream::<S> {
             inner: inner,
+            pending_security_parameters:
+                SecurityParameters::client_initial(),
             record_read_buf: Vec::with_capacity(2048),
             record_write_buf: Vec::with_capacity(2048),
             read_bufs: [
+                Cursor::new(Vec::with_capacity(10)),
+                Cursor::new(Vec::with_capacity(10)),
                 Cursor::new(Vec::with_capacity(1024)),
                 Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(1024)),
+                Cursor::new(Vec::with_capacity(10)),
             ],
             write_bufs: [
+                Cursor::new(Vec::with_capacity(10)),
+                Cursor::new(Vec::with_capacity(10)),
                 Cursor::new(Vec::with_capacity(1024)),
                 Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(1024)),
+                Cursor::new(Vec::with_capacity(10)),
             ],
         };
         return ret;
@@ -50,8 +54,10 @@ impl<S: Read + Write> TLSStream<S> {
         return Ok(());
     }
     fn send_client_hello(&mut self) -> io::Result<()> {
-        let mut client_hello = HandshakeMessage::ClientHello {
-            random: TLSRandom::new(),
+        let client_random = TLSRandom::new();
+        self.pending_security_parameters.client_random = client_random;
+        let client_hello = HandshakeMessage::ClientHello {
+            random: client_random,
             session_id: SessionID::empty(),
             cipher_suites: vec![
                 CipherSuite { id: TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, },
@@ -63,7 +69,7 @@ impl<S: Read + Write> TLSStream<S> {
                 CipherSuite { id: TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, },
             ],
             compression_methods: vec![
-                CompressionMethod { id: 0, },
+                CompressionMethod::Null,
             ],
             extensions: vec![
                 HelloExtension::ServerName(vec![
@@ -74,10 +80,6 @@ impl<S: Read + Write> TLSStream<S> {
         try!(client_hello.write_to(&mut self.write_bufs[HANDSHAKE_IDX]));
         try!(self.flush(HANDSHAKE_IDX));
         try!(self.flush_record());
-        return Ok(());
-    }
-    fn recv_server_hello(&mut self) -> io::Result<()> {
-        try!(self.record_read());
         return Ok(());
     }
     fn flush_record(&mut self) -> io::Result<()> {
@@ -112,7 +114,7 @@ impl<S: Read + Write> TLSStream<S> {
         vec.clear();
         return Ok(());
     }
-    fn record_read(&mut self) -> io::Result<()> {
+    fn read_record(&mut self) -> io::Result<()> {
         self.record_read_buf.reserve(1024);
         let len = self.record_read_buf.len();
         let cap = self.record_read_buf.capacity();
@@ -122,7 +124,7 @@ impl<S: Read + Write> TLSStream<S> {
         self.record_read_buf.resize(len + num_read, 0);
         return Ok(());
     }
-    fn record_consume(&mut self) -> io::Result<()> {
+    fn consume1_record(&mut self) -> io::Result<ContentType> {
         loop {
             let buflen = self.record_read_buf.len();
             let len =
@@ -133,79 +135,122 @@ impl<S: Read + Write> TLSStream<S> {
                         &self.record_read_buf[3..5]) as usize
                 };
             if buflen < 5 + len {
-                try!(self.record_read());
+                try!(self.read_record());
             } else {
                 let buf = &mut self.record_read_buf;
-                let content_type = buf[0];
+                let content_type = try!(ContentType::parse(buf[0]));
                 let version_major = buf[1];
                 let version_minor = buf[2];
                 // TODO
                 assert_eq!(version_major, 3);
                 assert_eq!(version_minor, 3);
-                let content_idx = match content_type {
-                    20 => CHANGE_CIPHER_SPEC_IDX,
-                    21 => ALERT_IDX,
-                    22 => HANDSHAKE_IDX,
-                    23 => APPLICATION_DATA_IDX,
-                    _ => {
-                        // TODO
-                        panic!("Unknown content type");
-                    }
-                };
                 {
                     let ciphertext = &buf[5 .. 5+len];
                     // TODO: it's just the ciphertext itself now!
                     let plaintext = ciphertext;
-                    self.read_bufs[content_idx].get_mut()
+                    self.read_bufs[content_type.idx()].get_mut()
                         .extend(plaintext.iter());
                 }
                 buf.drain(0 .. 5+len);
-                // println!("{:?}", &self.read_bufs[content_idx]);
-                return Ok(());
+                return Ok(content_type);
             }
         }
     }
-    fn check_change_cipher_spec(&mut self) -> io::Result<()> {
-        // TODO
-        return Ok(());
-    }
-    fn check_alert(&mut self) -> io::Result<()> {
-        // TODO
-        return Ok(());
-    }
-    fn check_handshake(&mut self) -> io::Result<()> {
-        let cursor = &mut self.read_bufs[HANDSHAKE_IDX];
-        {
-            let vec = cursor.get_mut();
-            if vec.len() < 4 {
-                return Ok(());
-            }
-            let length = {
-                let length0 = vec[1] as usize;
-                let length1 = vec[2] as usize;
-                let length2 = vec[3] as usize;
-                (length0 << 16) | (length1 << 8) | length2
+    fn consume_metadata(&mut self) -> io::Result<()> {
+        loop {
+            match try!(self.consume1_record()) {
+                ContentType::ChangeCipherSpec => {
+                    try!(self.consume_change_cipher_spec());
+                },
+                ContentType::Alert => {
+                    try!(self.consume_alert());
+                },
+                ContentType::Handshake => {
+                    try!(self.consume_handshake());
+                },
+                ContentType::ApplicationData => {
+                    return Ok(());
+                },
+                ContentType::Heartbeat => {
+                    try!(self.consume_heartbeat());
+                },
             };
-            if vec.len() < 4 + length {
-                return Ok(());
-            }
         }
-        let message = try!(HandshakeMessage::read_from(cursor));
-        println!("{:?}", &message);
-        let position = cursor.position() as usize;
-        cursor.set_position(0);
-        cursor.get_mut().drain(0 .. position);
-        return Ok(());
     }
-    fn read_buf(&mut self) -> io::Result<()> {
-        self.record_read_buf.reserve(1024);
-        let len = self.record_read_buf.len();
-        let cap = self.record_read_buf.capacity();
-        self.record_read_buf.resize(cap, 0);
-        let num_read = try!(
-            self.inner.read(&mut self.record_read_buf[len ..]));
-        self.record_read_buf.resize(len + num_read, 0);
-        return Ok(());
+    fn consume_change_cipher_spec(&mut self) -> io::Result<()> {
+        // TODO
+        panic!("TODO: implement ChangeCipherSpec");
+    }
+    fn consume_alert(&mut self) -> io::Result<()> {
+        // TODO
+        panic!("TODO: implement Alert");
+    }
+    fn consume_handshake(&mut self) -> io::Result<()> {
+        loop {
+            let message : HandshakeMessage;
+            {
+                let cursor = &mut self.read_bufs[HANDSHAKE_IDX];
+                {
+                    let vec = cursor.get_mut();
+                    if vec.len() < 4 {
+                        return Ok(());
+                    }
+                    let length = {
+                        let length0 = vec[1] as usize;
+                        let length1 = vec[2] as usize;
+                        let length2 = vec[3] as usize;
+                        (length0 << 16) | (length1 << 8) | length2
+                    };
+                    if vec.len() < 4 + length {
+                        return Ok(());
+                    }
+                }
+                message = try!(HandshakeMessage::read_from(cursor));
+                let position = cursor.position() as usize;
+                cursor.set_position(0);
+                cursor.get_mut().drain(0 .. position);
+            }
+            // println!("{:?}", &message);
+            match message {
+                HandshakeMessage::ClientHello {
+                    random,
+                    session_id,
+                    cipher_suites,
+                    compression_methods,
+                    extensions,
+                } => {
+                    // TODO
+                    panic!("TODO: ClienHello");
+                },
+                HandshakeMessage::ServerHello {
+                    server_version,
+                    random,
+                    session_id,
+                    cipher_suite,
+                    compression_method,
+                    extensions,
+                } => {
+                    // TODO
+                    assert_eq!(server_version, 0x0303);
+                    self.pending_security_parameters.compression_method
+                        = compression_method;
+                    self.pending_security_parameters.server_random
+                        = random;
+                    // println!("server_version = {:x}", server_version);
+                },
+                HandshakeMessage::Certificate(certificate_list) => {
+                    // TODO
+                    // println!("certificates:");
+                    // for certificate in certificate_list.iter() {
+                    //     println!("{:?}", certificate);
+                    // }
+                },
+            };
+        }
+    }
+    fn consume_heartbeat(&mut self) -> io::Result<()> {
+        // TODO
+        panic!("TODO: implement Heartbeat");
     }
 }
 
@@ -215,8 +260,10 @@ const CHANGE_CIPHER_SPEC_IDX : usize = 0;
 const ALERT_IDX : usize = 1;
 const HANDSHAKE_IDX : usize = 2;
 const APPLICATION_DATA_IDX : usize = 3;
+const HEARTBEAT_IDX : usize = 4;
 const CLIENT_HELLO : u8 = 0x01;
 const SERVER_HELLO : u8 = 0x02;
+const CERTIFICATE : u8 = 0x0B;
 
 const EXTENSION_SERVER_NAME : u16 = 0;
 const EXTENSION_MAX_FRAGMENT_LENGTH : u16 = 1;
@@ -235,18 +282,6 @@ enum ContentType {
 struct ProtocolVersion {
     major: u8,
     minor: u8,
-}
-
-struct TLSCiphertext {
-    content_type: ContentType,
-    version: ProtocolVersion,
-    fragment: Vec<u8>,
-}
-
-struct TLSPlaintext {
-    content_type: ContentType,
-    version: ProtocolVersion,
-    fragment: Vec<u8>,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -294,7 +329,7 @@ enum HandshakeMessage {
     },
     // HelloVerifyRequest,
     // NewSessionTicket,
-    // Certificate,
+    Certificate(Vec<Vec<u8>>),
     // ServerKeyExchange,
     // CertificateRequest,
     // ServerHelloDone,
@@ -306,13 +341,12 @@ enum HandshakeMessage {
     // SupplementalData,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 struct TLSRandom {
-    time: u32,
-    random_bytes: [u8; 28],
+    bytes: [u8; 32],
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 struct SessionID {
     length: usize,
     bytes: [u8; 32],
@@ -323,9 +357,9 @@ struct CipherSuite {
     id: u16,
 }
 
-#[derive(Debug)]
-struct CompressionMethod {
-    id: u8,
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+enum CompressionMethod {
+    Null,
 }
 
 #[derive(Debug)]
@@ -344,113 +378,6 @@ enum ServerName {
     HostName(Vec<u8>),
 }
 
-struct LengthMarkR16 {
-    end: u64,
-}
-
-struct LengthMarkR24 {
-    end: u64,
-}
-
-struct LengthMarkW16 {
-    begin: u64,
-}
-
-struct LengthMarkW24 {
-    begin: u64,
-}
-
-impl LengthMarkR16 {
-    fn new<R:Read+Seek>(src: &mut R) -> io::Result<Self> {
-        let length = try!(src.read_u16::<NetworkEndian>());
-        let begin = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(LengthMarkR16 {
-            end: begin + (length as u64),
-        });
-    }
-    fn is_remaining<R:Read+Seek>(&self, src: &mut R) -> io::Result<bool> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(current < self.end);
-    }
-    fn check<R:Read+Seek>(self, src: &mut R) -> io::Result<()> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        if current != self.end {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData, "Invalid Length"));
-        }
-        return Ok(());
-    }
-}
-
-impl LengthMarkR24 {
-    fn new<R:Read+Seek>(src: &mut R) -> io::Result<Self> {
-        let length = {
-            let length0 = try!(src.read_u8()) as u32;
-            let length1 = try!(src.read_u8()) as u32;
-            let length2 = try!(src.read_u8()) as u32;
-            (length0 << 16) | (length1 << 8) | length2
-        };
-        let begin = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(LengthMarkR24 {
-            end: begin + (length as u64),
-        });
-    }
-    fn is_remaining<R:Read+Seek>(&self, src: &mut R) -> io::Result<bool> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(current < self.end);
-    }
-    fn check<R:Read+Seek>(self, src: &mut R) -> io::Result<()> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        if current != self.end {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData, "Invalid Length"));
-        }
-        return Ok(());
-    }
-}
-
-impl LengthMarkW16 {
-    fn new<W:Write+Seek>(dest: &mut W) -> io::Result<Self> {
-        let begin = try!(dest.seek(io::SeekFrom::Current(0)));
-        try!(dest.write_u16::<NetworkEndian>(0));
-        return Ok(LengthMarkW16 {
-            begin: begin,
-        });
-    }
-    fn record<W:Write+Seek>(self, dest: &mut W) -> io::Result<()> {
-        let current = try!(dest.seek(io::SeekFrom::Current(0)));
-        let length = current - self.begin - 2;
-        assert!(length < 65536);
-        try!(dest.seek(io::SeekFrom::Start(self.begin)));
-        try!(dest.write_u16::<NetworkEndian>(length as u16));
-        try!(dest.seek(io::SeekFrom::Start(current)));
-        return Ok(());
-    }
-}
-
-impl LengthMarkW24 {
-    fn new<W:Write+Seek>(dest: &mut W) -> io::Result<Self> {
-        let begin = try!(dest.seek(io::SeekFrom::Current(0)));
-        try!(dest.write_u8(0));
-        try!(dest.write_u8(0));
-        try!(dest.write_u8(0));
-        return Ok(LengthMarkW24 {
-            begin: begin,
-        });
-    }
-    fn record<W:Write+Seek>(self, dest: &mut W) -> io::Result<()> {
-        let current = try!(dest.seek(io::SeekFrom::Current(0)));
-        let length = current - self.begin - 3;
-        assert!(length < 16777216);
-        try!(dest.seek(io::SeekFrom::Start(self.begin)));
-        try!(dest.write_u8((length >> 16) as u8));
-        try!(dest.write_u8((length >> 8) as u8));
-        try!(dest.write_u8((length >> 0) as u8));
-        try!(dest.seek(io::SeekFrom::Start(current)));
-        return Ok(());
-    }
-}
-
 impl<S: Read + Write> Drop for TLSStream<S> {
     fn drop(&mut self) {
         let _ = self.send_alert(Alert {
@@ -461,74 +388,58 @@ impl<S: Read + Write> Drop for TLSStream<S> {
 }
 
 impl ContentType {
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
-        let id = try!(src.read_u8());
+    fn from_idx(idx: usize) -> ContentType {
+        return match idx {
+            CHANGE_CIPHER_SPEC_IDX => ContentType::ChangeCipherSpec,
+            ALERT_IDX => ContentType::Alert,
+            HANDSHAKE_IDX => ContentType::Handshake,
+            APPLICATION_DATA_IDX => ContentType::ApplicationData,
+            HEARTBEAT_IDX => ContentType::Heartbeat,
+            _ => panic!("Invalid ContentType index"),
+        };
+    }
+    fn idx(self) -> usize {
+        return match self {
+            ContentType::ChangeCipherSpec => CHANGE_CIPHER_SPEC_IDX,
+            ContentType::Alert => ALERT_IDX,
+            ContentType::Handshake => HANDSHAKE_IDX,
+            ContentType::ApplicationData => APPLICATION_DATA_IDX,
+            ContentType::Heartbeat => HEARTBEAT_IDX,
+        };
+    }
+    fn from_id(id: u8) -> Option<ContentType> {
         let ret = match id {
             20 => ContentType::ChangeCipherSpec,
             21 => ContentType::Alert,
             22 => ContentType::Handshake,
             23 => ContentType::ApplicationData,
             24 => ContentType::Heartbeat,
-            _  => {
-                // TODO
-                panic!("Unknown ContentType");
-            }
+            _  => { return None; },
         };
-        return Ok(ret);
+        return Some(ret);
     }
-    fn write_to<W:Write>(self, dest: &mut W) -> io::Result<()> {
-        let id = match self {
+    fn id(self) -> u8 {
+        return match self {
             ContentType::ChangeCipherSpec => 20,
             ContentType::Alert => 21,
             ContentType::Handshake => 22,
-            ContentType::Heartbeat => 23,
-            _ => {
-                // TODO
-                panic!("Unknown ContentType");
-            }
+            ContentType::ApplicationData => 23,
+            ContentType::Heartbeat => 24,
         };
-        try!(dest.write_u8(id));
-        return Ok(());
+    }
+    fn parse(id: u8) -> io::Result<Self> {
+        return Self::from_id(id).ok_or(
+            io::Error::new(io::ErrorKind::InvalidData,
+                           "Invalid ContentType"));
     }
 }
 
 impl ProtocolVersion {
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
-        let major = try!(src.read_u8());
-        let minor = try!(src.read_u8());
-        let ret = ProtocolVersion {
-            major: major,
-            minor: minor,
-        };
-        return Ok(ret);
-    }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
-        try!(dest.write_u8(self.major));
-        try!(dest.write_u8(self.minor));
-        return Ok(());
-    }
-}
-
-impl TLSCiphertext {
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
-        let content_type = try!(ContentType::read_from(src));
-        let version = try!(ProtocolVersion::read_from(src));
-        let length = try!(src.read_u16::<NetworkEndian>()) as usize;
-        let mut fragment = vec![0; length];
-        try!(src.read_exact(&mut fragment));
-        let ret = TLSCiphertext {
-            content_type: content_type,
-            version: version,
-            fragment: fragment,
-        };
-        return Ok(ret);
-    }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
-        try!(self.content_type.write_to(dest));
-        try!(self.version.write_to(dest));
-        try!(dest.write_u16::<NetworkEndian>(self.fragment.len() as u16));
-        try!(dest.write_all(&self.fragment));
-        return Ok(());
+    fn parse(buf: &[u8]) -> io::Result<Self> {
+        return Ok(ProtocolVersion {
+            major: buf[0],
+            minor: buf[1],
+        });
     }
 }
 
@@ -650,16 +561,11 @@ impl HandshakeMessage {
             },
             SERVER_HELLO => {
                 let server_version = try!(src.read_u16::<NetworkEndian>());
-                println!("{:?}", &server_version);
                 let random = try!(TLSRandom::read_from(src));
-                println!("{:?}", &random);
                 let session_id = try!(SessionID::read_from(src));
-                println!("{:?}", &session_id);
                 let cipher_suite = try!(CipherSuite::read_from(src));
-                println!("{:?}", &cipher_suite);
                 let compression_method =
                     try!(CompressionMethod::read_from(src));
-                println!("{:?}", &compression_method);
                 let mut extensions = Vec::new();
                 if try!(handshake_mark.is_remaining(src)) {
                     let extensions_mark = try!(LengthMarkR16::new(src));
@@ -668,7 +574,6 @@ impl HandshakeMessage {
                     }
                     try!(extensions_mark.check(src));
                 }
-                println!("{:?}", &extensions);
                 ret = HandshakeMessage::ServerHello {
                     server_version: server_version,
                     random: random,
@@ -677,11 +582,27 @@ impl HandshakeMessage {
                     compression_method: compression_method,
                     extensions: extensions,
                 };
-                println!("{:?}", &ret);
             },
-            _ => {
+            CERTIFICATE => {
+                let mut certificate_list = Vec::new();
+                let certificate_list_mark = try!(LengthMarkR24::new(src));
+                while try!(certificate_list_mark.is_remaining(src)) {
+                    let length = {
+                        let length0 = try!(src.read_u8()) as usize;
+                        let length1 = try!(src.read_u8()) as usize;
+                        let length2 = try!(src.read_u8()) as usize;
+                        (length0 << 16) | (length1 << 8) | length2
+                    };
+                    let mut certificate = vec![0; length];
+                    try!(src.read_exact(&mut certificate));
+                    certificate_list.push(certificate);
+                }
+                try!(certificate_list_mark.check(src));
+                ret = HandshakeMessage::Certificate(certificate_list);
+            },
+            t => {
                 // TODO
-                panic!("TODO: Unknown Handshake Type");
+                panic!("TODO: Unknown Handshake Type {}", t);
             }
         };
         try!(handshake_mark.check(src));
@@ -730,6 +651,10 @@ impl HandshakeMessage {
                 // TODO
                 panic!("TODO: write_to for ServerHello");
             },
+            &HandshakeMessage::Certificate(ref certificate_list) => {
+                // TODO
+                panic!("TODO: write_to for Certificate");
+            }
         };
         return Ok(());
     }
@@ -737,29 +662,37 @@ impl HandshakeMessage {
 
 impl TLSRandom {
     fn new() -> TLSRandom {
+        let time = time::now().to_timespec().sec as u32;
         let mut ret = TLSRandom {
-            time: time::now().to_timespec().sec as u32,
-            random_bytes: [0; 28],
+            bytes: [0; 32],
         };
-        for i in 0..7 {
+        NetworkEndian::write_u32(&mut ret.bytes[0..4], time);
+        for i in 1..8 {
             NetworkEndian::write_u32(
-                &mut ret.random_bytes[i*4 .. i*4+4],
-                rand::random::<u32>());
+                &mut ret.bytes[i*4 .. i*4+4], rand::random::<u32>());
         }
         return ret;
     }
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
-        let time = try!(src.read_u32::<NetworkEndian>());
-        let mut ret = TLSRandom {
-            time: time,
-            random_bytes: [0; 28],
+    fn empty() -> TLSRandom {
+        return TLSRandom {
+            bytes: [0; 32],
         };
-        try!(src.read(&mut ret.random_bytes));
+    }
+    fn time(&self) -> u32 {
+        return NetworkEndian::read_u32(&self.bytes[0..4]);
+    }
+    fn random_bytes<'a>(& 'a self) -> & 'a [u8] {
+        return &self.bytes[4..32];
+    }
+    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
+        let mut ret = TLSRandom {
+            bytes: [0; 32],
+        };
+        try!(src.read_exact(&mut ret.bytes));
         return Ok(ret);
     }
     fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
-        try!(dest.write_u32::<NetworkEndian>(self.time));
-        try!(dest.write_all(&self.random_bytes));
+        try!(dest.write_all(&self.bytes));
         return Ok(());
     }
 }
@@ -802,15 +735,27 @@ impl CipherSuite {
 }
 
 impl CompressionMethod {
+    fn from_id(id: u8) -> Option<CompressionMethod> {
+        let ret = match id {
+            0 => CompressionMethod::Null,
+            _  => { return None; },
+        };
+        return Some(ret);
+    }
+    fn id(self) -> u8 {
+        return match self {
+            CompressionMethod::Null => 0,
+        };
+    }
     fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
         let id = try!(src.read_u8());
-        let ret = CompressionMethod {
-            id: id
-        };
+        let ret = try!(Self::from_id(id).ok_or(
+            io::Error::new(io::ErrorKind::InvalidData,
+                           "Invalid CompressionMethod")));
         return Ok(ret);
     }
     fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
-        try!(dest.write_u8(self.id));
+        try!(dest.write_u8(self.id()));
         return Ok(());
     }
 }
@@ -892,15 +837,60 @@ enum ConnectionEnd {
     Server, Client,
 }
 
+enum PRFAlgorithm {
+    TlsPrfSha256,
+}
+
+enum BulkCipherAlgorithm {
+    Null, RC4, TripleDES, AES,
+}
+
+enum CipherType {
+    Stream, Block, AEAD,
+}
+
+enum MACAlgorithm {
+    Null, HmacMd5, HmacSha1, HmacSha256, HmacSha384, HmacSha512,
+}
+
 struct SecurityParameters {
     entity: ConnectionEnd,
+    prf_algorithm: PRFAlgorithm,
+    bulk_cipher_algorithm: BulkCipherAlgorithm,
+    cipher_type: CipherType,
     enc_key_length: u8,
     block_length: u8,
     fixed_iv_length: u8,
     record_iv_length: u8,
+    mac_algorithm: MACAlgorithm,
+    mac_length: u8,
+    mac_key_length: u8,
+    compression_method: CompressionMethod,
     master_secret: [u8; 48],
-    client_random: [u8; 32],
-    server_random: [u8; 32],
+    client_random: TLSRandom,
+    server_random: TLSRandom,
+}
+
+impl SecurityParameters {
+    fn client_initial() -> SecurityParameters {
+        return SecurityParameters {
+            entity: ConnectionEnd::Client,
+            prf_algorithm: PRFAlgorithm::TlsPrfSha256,
+            bulk_cipher_algorithm: BulkCipherAlgorithm::Null,
+            cipher_type: CipherType::Stream,
+            enc_key_length: 0,
+            block_length: 0,
+            fixed_iv_length: 0,
+            record_iv_length: 0,
+            mac_algorithm: MACAlgorithm::Null,
+            mac_length: 0,
+            mac_key_length: 0,
+            compression_method: CompressionMethod::Null,
+            master_secret: [0; 48],
+            client_random: TLSRandom::empty(),
+            server_random: TLSRandom::empty(),
+        };
+    }
 }
 
 pub const TLS_NULL_WITH_NULL_NULL                       : u16 = 0x0000;
@@ -1257,17 +1247,22 @@ pub const TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256   : u16 = 0xCCAC;
 pub const TLS_DHE_PSK_WITH_CHACHA20_POLY1305_SHA256     : u16 = 0xCCAD;
 pub const TLS_RSA_PSK_WITH_CHACHA20_POLY1305_SHA256     : u16 = 0xCCAE;
 
-#[cfg(test)]
 #[test]
 fn foo() {
     use std::net::TcpStream;
     let stream = TcpStream::connect("qnighy.info:443").unwrap();
     let mut stream = TLSStream::new(stream);
     stream.send_client_hello().unwrap();
+    stream.consume_metadata().unwrap();
+    panic!();
+}
 
-    stream.record_consume().unwrap();
-    stream.check_change_cipher_spec().unwrap();
-    stream.check_alert().unwrap();
-    stream.check_handshake().unwrap();
+// TODO: dummy against deadcode detection
+pub fn bar() {
+    use std::net::TcpStream;
+    let stream = TcpStream::connect("qnighy.info:443").unwrap();
+    let mut stream = TLSStream::new(stream);
+    stream.send_client_hello().unwrap();
+    stream.consume_metadata().unwrap();
     panic!();
 }
