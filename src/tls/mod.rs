@@ -7,7 +7,8 @@ extern crate byteorder;
 extern crate time;
 extern crate rand;
 
-use misc::{LengthMarkR16, LengthMarkR24, LengthMarkW16, LengthMarkW24};
+use misc::{PositionVec, Length16, Length24};
+use misc::{LengthMarkR16, LengthMarkR24};
 use std::cmp;
 use std::io::{self,Read,Write,Seek,Cursor};
 use std::str;
@@ -19,7 +20,7 @@ pub struct TLSStream<S : Read + Write> {
     record_read_buf: Vec<u8>,
     record_write_buf: Vec<u8>,
     read_bufs: [Cursor<Vec<u8>>; 5],
-    write_bufs: [Cursor<Vec<u8>>; 5],
+    write_bufs: [Vec<u8>; 5],
 }
 
 impl<S: Read + Write> TLSStream<S> {
@@ -38,11 +39,11 @@ impl<S: Read + Write> TLSStream<S> {
                 Cursor::new(Vec::with_capacity(10)),
             ],
             write_bufs: [
-                Cursor::new(Vec::with_capacity(10)),
-                Cursor::new(Vec::with_capacity(10)),
-                Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(10)),
+                Vec::with_capacity(10),
+                Vec::with_capacity(10),
+                Vec::with_capacity(1024),
+                Vec::with_capacity(1024),
+                Vec::with_capacity(10),
             ],
         };
         return ret;
@@ -96,9 +97,7 @@ impl<S: Read + Write> TLSStream<S> {
     }
     fn flush(&mut self, content_idx: usize) -> io::Result<()> {
         assert!(content_idx < 4);
-        let cursor = &mut self.write_bufs[content_idx];
-        cursor.set_position(0);
-        let vec = cursor.get_mut();
+        let vec = &mut self.write_bufs[content_idx];
         let mut pos : usize = 0;
         let maxlen = vec.len();
         while pos < maxlen {
@@ -501,7 +500,7 @@ impl Alert {
             description: description,
         });
     }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         try!(dest.write_u8(self.level.id()));
         try!(dest.write_u8(self.description.id()));
         return Ok(());
@@ -567,7 +566,7 @@ impl HandshakeMessage {
         try!(handshake_mark.check(src));
         return Ok(ret);
     }
-    fn write_to<W:Write+Seek>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         match self {
             &HandshakeMessage::ClientHello {
                 ref random,
@@ -577,7 +576,8 @@ impl HandshakeMessage {
                 ref extensions,
             } => {
                 try!(dest.write_u8(CLIENT_HELLO));
-                let handshake_mark = try!(LengthMarkW24::new(dest));
+                let mut handshake_pos = PositionVec::<Length24>::new(dest);
+                let dest = handshake_pos.get();
                 try!(dest.write_all(&[0x03, 0x03]));
                 try!(random.write_to(dest));
                 try!(session_id.write_to(dest));
@@ -591,13 +591,13 @@ impl HandshakeMessage {
                     try!(compression_method.write_to(dest));
                 }
                 if extensions.len() > 0 {
-                    let extensions_mark = try!(LengthMarkW16::new(dest));
+                    let mut extensions_pos
+                        = PositionVec::<Length16>::new(dest);
+                    let dest = extensions_pos.get();
                     for extension in extensions {
                         try!(extension.write_to(dest));
                     }
-                    try!(extensions_mark.record(dest));
                 }
-                try!(handshake_mark.record(dest));
             }
             &HandshakeMessage::ServerHello {
                 ref server_version,
@@ -650,7 +650,7 @@ impl TLSRandom {
         try!(src.read_exact(&mut ret.bytes));
         return Ok(ret);
     }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         try!(dest.write_all(&self.bytes));
         return Ok(());
     }
@@ -672,7 +672,7 @@ impl SessionID {
         try!(src.read_exact(&mut ret.bytes[0 .. length]));
         return Ok(ret);
     }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         try!(dest.write_u8(self.length as u8));
         try!(dest.write_all(&self.bytes[0 .. self.length]));
         return Ok(());
@@ -701,7 +701,7 @@ impl CipherSuite {
         let ret = try!(Self::parse(id));
         return Ok(ret);
     }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         try!(dest.write_u16::<NetworkEndian>(self.id()));
         return Ok(());
     }
@@ -728,7 +728,7 @@ impl CompressionMethod {
                            "Invalid CompressionMethod")));
         return Ok(ret);
     }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         try!(dest.write_u8(self.id()));
         return Ok(());
     }
@@ -759,17 +759,18 @@ impl HelloExtension {
         try!(extension_mark.check(src));
         return Ok(ret);
     }
-    fn write_to<W:Write+Seek>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         match self {
             &HelloExtension::ServerName(ref server_names) => {
                 try!(dest.write_u16::<NetworkEndian>(EXTENSION_SERVER_NAME));
-                let extension_mark = try!(LengthMarkW16::new(dest));
-                let server_name_list_mark = try!(LengthMarkW16::new(dest));
+                let mut extension_pos = PositionVec::<Length16>::new(dest);
+                let dest = extension_pos.get();
+                let mut server_name_list_pos
+                    = PositionVec::<Length16>::new(dest);
+                let dest = server_name_list_pos.get();
                 for server_name in server_names {
                     try!(server_name.write_to(dest));
                 }
-                try!(server_name_list_mark.record(dest));
-                try!(extension_mark.record(dest));
             }
         }
         return Ok(());
@@ -794,7 +795,7 @@ impl ServerName {
         }
         return Ok(ret);
     }
-    fn write_to<W:Write>(&self, dest: &mut W) -> io::Result<()> {
+    fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         match self {
             &ServerName::HostName(ref host_name) => {
                 try!(dest.write_u8(0x00));

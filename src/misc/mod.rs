@@ -7,6 +7,21 @@ extern crate byteorder;
 
 use std::io::{self,Read,Write,Seek};
 use self::byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
+use std::marker::PhantomData;
+
+pub trait LengthWriter {
+    fn skip(vec: &mut Vec<u8>);
+    fn write(vec: &mut Vec<u8>, position: usize);
+}
+
+pub enum Length16 {}
+pub enum Length24 {}
+
+pub struct PositionVec<'a, L:LengthWriter> {
+    vec: &'a mut Vec<u8>,
+    position: usize,
+    phantom: PhantomData<L>,
+}
 
 pub struct LengthMarkR16 {
     end: u64,
@@ -16,12 +31,59 @@ pub struct LengthMarkR24 {
     end: u64,
 }
 
-pub struct LengthMarkW16 {
-    begin: u64,
+impl<'a, L:LengthWriter> PositionVec<'a, L> {
+    pub fn new(vec: &'a mut Vec<u8>) -> PositionVec<'a, L> {
+        L::skip(vec);
+        let position = vec.len();
+        return PositionVec {
+            vec: vec,
+            position: position,
+            phantom: PhantomData,
+        };
+    }
+    pub fn get(&mut self) -> &mut Vec<u8> {
+        return self.vec;
+    }
 }
 
-pub struct LengthMarkW24 {
-    begin: u64,
+impl<'a, L:LengthWriter> Drop for PositionVec<'a, L> {
+    fn drop(&mut self) {
+        L::write(self.vec, self.position);
+    }
+}
+
+impl<'a, L:LengthWriter> Write for PositionVec<'a, L> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        return self.vec.write(buf);
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        return self.vec.flush();
+    }
+}
+
+impl LengthWriter for Length16 {
+    fn skip(vec: &mut Vec<u8>) {
+        vec.extend_from_slice(&[0, 0]);
+    }
+    fn write(vec: &mut Vec<u8>, position: usize) {
+        let length = vec.len() - position;
+        assert!(length < 65536);
+        vec[position-2] = (length >> 8) as u8;
+        vec[position-1] = (length >> 0) as u8;
+    }
+}
+
+impl LengthWriter for Length24 {
+    fn skip(vec: &mut Vec<u8>) {
+        vec.extend_from_slice(&[0, 0, 0]);
+    }
+    fn write(vec: &mut Vec<u8>, position: usize) {
+        let length = vec.len() - position;
+        assert!(length < 16777216);
+        vec[position-3] = (length >> 16) as u8;
+        vec[position-2] = (length >> 8) as u8;
+        vec[position-1] = (length >> 0) as u8;
+    }
 }
 
 impl LengthMarkR16 {
@@ -69,48 +131,6 @@ impl LengthMarkR24 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData, "Invalid Length"));
         }
-        return Ok(());
-    }
-}
-
-impl LengthMarkW16 {
-    pub fn new<W:Write+Seek>(dest: &mut W) -> io::Result<Self> {
-        let begin = try!(dest.seek(io::SeekFrom::Current(0)));
-        try!(dest.write_u16::<NetworkEndian>(0));
-        return Ok(LengthMarkW16 {
-            begin: begin,
-        });
-    }
-    pub fn record<W:Write+Seek>(self, dest: &mut W) -> io::Result<()> {
-        let current = try!(dest.seek(io::SeekFrom::Current(0)));
-        let length = current - self.begin - 2;
-        assert!(length < 65536);
-        try!(dest.seek(io::SeekFrom::Start(self.begin)));
-        try!(dest.write_u16::<NetworkEndian>(length as u16));
-        try!(dest.seek(io::SeekFrom::Start(current)));
-        return Ok(());
-    }
-}
-
-impl LengthMarkW24 {
-    pub fn new<W:Write+Seek>(dest: &mut W) -> io::Result<Self> {
-        let begin = try!(dest.seek(io::SeekFrom::Current(0)));
-        try!(dest.write_u8(0));
-        try!(dest.write_u8(0));
-        try!(dest.write_u8(0));
-        return Ok(LengthMarkW24 {
-            begin: begin,
-        });
-    }
-    pub fn record<W:Write+Seek>(self, dest: &mut W) -> io::Result<()> {
-        let current = try!(dest.seek(io::SeekFrom::Current(0)));
-        let length = current - self.begin - 3;
-        assert!(length < 16777216);
-        try!(dest.seek(io::SeekFrom::Start(self.begin)));
-        try!(dest.write_u8((length >> 16) as u8));
-        try!(dest.write_u8((length >> 8) as u8));
-        try!(dest.write_u8((length >> 0) as u8));
-        try!(dest.seek(io::SeekFrom::Start(current)));
         return Ok(());
     }
 }
