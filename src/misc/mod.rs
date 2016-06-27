@@ -3,11 +3,9 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
-extern crate byteorder;
-
 use std::io::{self,Read,Write,Seek};
-use self::byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
 use std::marker::PhantomData;
+use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
 
 pub trait LengthWriter {
     fn skip(vec: &mut Vec<u8>);

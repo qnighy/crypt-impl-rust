@@ -3,16 +3,14 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
-extern crate byteorder;
-extern crate time;
-extern crate rand;
-
-use misc::{PositionVec, Length16, Length24};
-use misc::{LengthMarkR16, LengthMarkR24};
 use std::cmp;
 use std::io::{self,Read,Write,Seek,Cursor};
 use std::str;
-use self::byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
+use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
+use time;
+use rand;
+use misc::{PositionVec, Length16, Length24};
+use misc::{LengthMarkR16, LengthMarkR24};
 
 pub struct TLSStream<S : Read + Write> {
     inner: S,

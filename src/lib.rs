@@ -3,6 +3,10 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
+extern crate byteorder;
+extern crate time;
+extern crate rand;
+
 mod misc;
 pub mod md5;
 pub mod sha1;
