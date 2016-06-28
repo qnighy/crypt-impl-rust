@@ -235,6 +235,8 @@ impl<S: Read + Write> TLSStream<S> {
                 } => {
                     // TODO
                     assert_eq!(server_version, 0x0303);
+                    self.pending_security_parameters.cipher_suite
+                        = cipher_suite;
                     self.pending_security_parameters.compression_method
                         = compression_method;
                     self.pending_security_parameters.server_random
@@ -784,40 +786,20 @@ impl ServerName {
     }
 }
 
-enum ConnectionEnd {
-    Server, Client,
-}
+// enum ConnectionEnd {
+//     Server, Client,
+// }
 
-enum PRFAlgorithm {
-    TlsPrfSha256,
-}
-
-enum BulkCipherAlgorithm {
-    Null, RC4, TripleDES, AES,
-}
-
-enum CipherType {
-    Stream, Block, AEAD,
-}
-
-enum MACAlgorithm {
-    Null, HmacMd5, HmacSha1, HmacSha256, HmacSha384, HmacSha512,
-}
+// enum PRFAlgorithm {
+//     TlsPrfSha256,
+// }
 
 struct SecurityParameters {
-    entity: ConnectionEnd,
-    prf_algorithm: PRFAlgorithm,
-    bulk_cipher_algorithm: BulkCipherAlgorithm,
-    cipher_type: CipherType,
-    enc_key_length: u8,
-    block_length: u8,
-    fixed_iv_length: u8,
-    record_iv_length: u8,
-    mac_algorithm: MACAlgorithm,
-    mac_length: u8,
-    mac_key_length: u8,
+    // entity: ConnectionEnd,
+    // prf_algorithm: PRFAlgorithm,
+    cipher_suite: CipherSuite,
     compression_method: CompressionMethod,
-    master_secret: [u8; 48],
+    // master_secret: [u8; 48],
     client_random: TLSRandom,
     server_random: TLSRandom,
 }
@@ -825,19 +807,11 @@ struct SecurityParameters {
 impl SecurityParameters {
     fn client_initial() -> SecurityParameters {
         return SecurityParameters {
-            entity: ConnectionEnd::Client,
-            prf_algorithm: PRFAlgorithm::TlsPrfSha256,
-            bulk_cipher_algorithm: BulkCipherAlgorithm::Null,
-            cipher_type: CipherType::Stream,
-            enc_key_length: 0,
-            block_length: 0,
-            fixed_iv_length: 0,
-            record_iv_length: 0,
-            mac_algorithm: MACAlgorithm::Null,
-            mac_length: 0,
-            mac_key_length: 0,
+            // entity: ConnectionEnd::Client,
+            // prf_algorithm: PRFAlgorithm::TlsPrfSha256,
+            cipher_suite: CipherSuite::TlsNullWithNullNull,
             compression_method: CompressionMethod::Null,
-            master_secret: [0; 48],
+            // master_secret: [0; 48],
             client_random: TLSRandom::empty(),
             server_random: TLSRandom::empty(),
         };
