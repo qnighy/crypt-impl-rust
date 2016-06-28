@@ -3,7 +3,7 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
-use std::io::{self,Read,Write,Seek};
+use std::io::{self,Read,Write,Seek,Cursor};
 use std::marker::PhantomData;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
 
@@ -12,21 +12,17 @@ pub trait LengthWriter {
     fn write(vec: &mut Vec<u8>, position: usize);
 }
 
+pub trait LengthReader {
+    fn read(buf: &mut Cursor<&[u8]>) -> io::Result<usize>;
+}
+
 pub enum Length16 {}
 pub enum Length24 {}
 
-pub struct PositionVec<'a, L:LengthWriter> {
+pub struct PositionVec<'a, L> {
     vec: &'a mut Vec<u8>,
     position: usize,
     phantom: PhantomData<L>,
-}
-
-pub struct LengthMarkR16 {
-    end: u64,
-}
-
-pub struct LengthMarkR24 {
-    end: u64,
 }
 
 impl<'a, L:LengthWriter> PositionVec<'a, L> {
@@ -42,11 +38,10 @@ impl<'a, L:LengthWriter> PositionVec<'a, L> {
     pub fn get(&mut self) -> &mut Vec<u8> {
         return self.vec;
     }
-}
-
-impl<'a, L:LengthWriter> Drop for PositionVec<'a, L> {
-    fn drop(&mut self) {
+    pub fn finalize(self) {
+        use std::mem;
         L::write(self.vec, self.position);
+        // mem::forget(self);
     }
 }
 
@@ -58,6 +53,12 @@ impl<'a, L:LengthWriter> Write for PositionVec<'a, L> {
         return self.vec.flush();
     }
 }
+
+// impl<'a, L> Drop for PositionVec<'a, L> {
+//     fn drop(&mut self) {
+//         panic!("Finalize PositionVec manually!");
+//     }
+// }
 
 impl LengthWriter for Length16 {
     fn skip(vec: &mut Vec<u8>) {
@@ -84,51 +85,53 @@ impl LengthWriter for Length24 {
     }
 }
 
-impl LengthMarkR16 {
-    pub fn new<R:Read+Seek>(src: &mut R) -> io::Result<Self> {
-        let length = try!(src.read_u16::<NetworkEndian>());
-        let begin = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(LengthMarkR16 {
-            end: begin + (length as u64),
-        });
+pub trait OnMemoryRead<'a>: Read {
+    fn read_buf_exact(&mut self, len: usize) -> &'a [u8];
+    fn remaining(&self) -> usize;
+    fn is_remaining(&self) -> bool {
+        return self.remaining() > 0;
     }
-    pub fn is_remaining<R:Read+Seek>(&self, src: &mut R) -> io::Result<bool> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(current < self.end);
+    fn check_remaining(&self) -> io::Result<()> {
+        if self.is_remaining() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData, "Invalid Length"));
+        } else {
+            return Ok(());
+        }
     }
-    pub fn check<R:Read+Seek>(self, src: &mut R) -> io::Result<()> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        if current != self.end {
+    fn read_buf_u16sized(&mut self, minlen: usize, maxlen: usize)
+            -> io::Result<&'a [u8]> {
+        let length = try!(self.read_u16::<NetworkEndian>()) as usize;
+        if length < minlen || maxlen < length || self.remaining() < length {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData, "Invalid Length"));
         }
-        return Ok(());
+        return Ok(self.read_buf_exact(length));
+    }
+    fn read_buf_u24sized(&mut self, minlen: usize, maxlen: usize)
+            -> io::Result<&'a [u8]> {
+        let length = {
+            let length0 = try!(self.read_u8()) as usize;
+            let length1 = try!(self.read_u8()) as usize;
+            let length2 = try!(self.read_u8()) as usize;
+            (length0 << 16) | (length1 << 8) | length2
+        };
+        if length < minlen || maxlen < length || self.remaining() < length {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData, "Invalid Length"));
+        }
+        return Ok(self.read_buf_exact(length));
     }
 }
 
-impl LengthMarkR24 {
-    pub fn new<R:Read+Seek>(src: &mut R) -> io::Result<Self> {
-        let length = {
-            let length0 = try!(src.read_u8()) as u32;
-            let length1 = try!(src.read_u8()) as u32;
-            let length2 = try!(src.read_u8()) as u32;
-            (length0 << 16) | (length1 << 8) | length2
-        };
-        let begin = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(LengthMarkR24 {
-            end: begin + (length as u64),
-        });
+impl<'a> OnMemoryRead<'a> for Cursor<&'a [u8]> {
+    fn read_buf_exact(&mut self, len: usize) -> &'a [u8] {
+        let position = self.position() as usize;
+        let ret = &self.get_ref()[position .. position+len];
+        self.set_position((position+len) as u64);
+        return ret;
     }
-    pub fn is_remaining<R:Read+Seek>(&self, src: &mut R) -> io::Result<bool> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        return Ok(current < self.end);
-    }
-    pub fn check<R:Read+Seek>(self, src: &mut R) -> io::Result<()> {
-        let current = try!(src.seek(io::SeekFrom::Current(0)));
-        if current != self.end {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData, "Invalid Length"));
-        }
-        return Ok(());
+    fn remaining(&self) -> usize {
+        return self.get_ref().len() - (self.position() as usize);
     }
 }

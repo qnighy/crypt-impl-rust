@@ -9,15 +9,15 @@ use std::str;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
 use time;
 use rand;
-use misc::{PositionVec, Length16, Length24};
-use misc::{LengthMarkR16, LengthMarkR24};
+use misc;
+use misc::{PositionVec, Length16, Length24, OnMemoryRead};
 
 pub struct TLSStream<S : Read + Write> {
     inner: S,
     pending_security_parameters: SecurityParameters,
     record_read_buf: Vec<u8>,
     record_write_buf: Vec<u8>,
-    read_bufs: [Cursor<Vec<u8>>; 5],
+    read_bufs: [Vec<u8>; 5],
     write_bufs: [Vec<u8>; 5],
 }
 
@@ -30,11 +30,11 @@ impl<S: Read + Write> TLSStream<S> {
             record_read_buf: Vec::with_capacity(2048),
             record_write_buf: Vec::with_capacity(2048),
             read_bufs: [
-                Cursor::new(Vec::with_capacity(10)),
-                Cursor::new(Vec::with_capacity(10)),
-                Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(1024)),
-                Cursor::new(Vec::with_capacity(10)),
+                Vec::with_capacity(10),
+                Vec::with_capacity(10),
+                Vec::with_capacity(1024),
+                Vec::with_capacity(1024),
+                Vec::with_capacity(10),
             ],
             write_bufs: [
                 Vec::with_capacity(10),
@@ -145,7 +145,7 @@ impl<S: Read + Write> TLSStream<S> {
                     let ciphertext = &buf[5 .. 5+len];
                     // TODO: it's just the ciphertext itself now!
                     let plaintext = ciphertext;
-                    self.read_bufs[content_type.idx()].get_mut()
+                    self.read_bufs[content_type.idx()]
                         .extend(plaintext.iter());
                 }
                 buf.drain(0 .. 5+len);
@@ -186,9 +186,8 @@ impl<S: Read + Write> TLSStream<S> {
         loop {
             let message : HandshakeMessage;
             {
-                let cursor = &mut self.read_bufs[ContentType::Handshake.idx()];
+                let vec = &mut self.read_bufs[ContentType::Handshake.idx()];
                 {
-                    let vec = cursor.get_mut();
                     if vec.len() < 4 {
                         return Ok(());
                     }
@@ -202,10 +201,14 @@ impl<S: Read + Write> TLSStream<S> {
                         return Ok(());
                     }
                 }
-                message = try!(HandshakeMessage::read_from(cursor));
-                let position = cursor.position() as usize;
-                cursor.set_position(0);
-                cursor.get_mut().drain(0 .. position);
+                let position;
+                {
+                    let mut cursor = Cursor::<&[u8]>::new(&vec);
+                    // TODO: error handling
+                    message = try!(HandshakeMessage::read_from(&mut cursor));
+                    position = cursor.position() as usize;
+                }
+                vec.drain(0 .. position);
             }
             // println!("{:?}", &message);
             match message {
@@ -488,7 +491,7 @@ impl AlertDescription {
 }
 
 impl Alert {
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let level_id = try!(src.read_u8());
         let level = try!(AlertLevel::parse(level_id));
         let description_id = try!(src.read_u8());
@@ -506,9 +509,9 @@ impl Alert {
 }
 
 impl HandshakeMessage {
-    fn read_from<R:Read+Seek>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let handshake_type = try!(src.read_u8());
-        let handshake_mark = try!(LengthMarkR24::new(src));
+        let mut src_hs = Cursor::new(try!(src.read_buf_u24sized(0, 16777216)));
         let ret : HandshakeMessage;
         match handshake_type {
             CLIENT_HELLO => {
@@ -516,19 +519,21 @@ impl HandshakeMessage {
                 panic!("TODO: read_from for ClientHello");
             },
             SERVER_HELLO => {
-                let server_version = try!(src.read_u16::<NetworkEndian>());
-                let random = try!(TLSRandom::read_from(src));
-                let session_id = try!(SessionID::read_from(src));
-                let cipher_suite = try!(CipherSuite::read_from(src));
+                let server_version = try!(src_hs.read_u16::<NetworkEndian>());
+                let random = try!(TLSRandom::read_from(&mut src_hs));
+                let session_id = try!(SessionID::read_from(&mut src_hs));
+                let cipher_suite = try!(CipherSuite::read_from(&mut src_hs));
                 let compression_method =
-                    try!(CompressionMethod::read_from(src));
+                    try!(CompressionMethod::read_from(&mut src_hs));
                 let mut extensions = Vec::new();
-                if try!(handshake_mark.is_remaining(src)) {
-                    let extensions_mark = try!(LengthMarkR16::new(src));
-                    while try!(extensions_mark.is_remaining(src)) {
-                        extensions.push(try!(HelloExtension::read_from(src)));
+                if src_hs.is_remaining() {
+                    let mut src_ext =
+                        Cursor::new(try!(src_hs.read_buf_u16sized(0, 65535)));
+                    while src_hs.is_remaining() {
+                        extensions.push(
+                            try!(HelloExtension::read_from(&mut src_ext)));
                     }
-                    try!(extensions_mark.check(src));
+                    src_ext.check_remaining();
                 }
                 ret = HandshakeMessage::ServerHello {
                     server_version: server_version,
@@ -541,19 +546,15 @@ impl HandshakeMessage {
             },
             CERTIFICATE => {
                 let mut certificate_list = Vec::new();
-                let certificate_list_mark = try!(LengthMarkR24::new(src));
-                while try!(certificate_list_mark.is_remaining(src)) {
-                    let length = {
-                        let length0 = try!(src.read_u8()) as usize;
-                        let length1 = try!(src.read_u8()) as usize;
-                        let length2 = try!(src.read_u8()) as usize;
-                        (length0 << 16) | (length1 << 8) | length2
-                    };
-                    let mut certificate = vec![0; length];
-                    try!(src.read_exact(&mut certificate));
+                let mut src_certs =
+                    Cursor::new(try!(src_hs.read_buf_u24sized(0, 16777215)));
+                while src_certs.is_remaining() {
+                    let certificate =
+                        try!(src_certs.read_buf_u24sized(1, 16777215))
+                        .to_vec();
                     certificate_list.push(certificate);
                 }
-                try!(certificate_list_mark.check(src));
+                src_certs.check_remaining();
                 ret = HandshakeMessage::Certificate(certificate_list);
             },
             t => {
@@ -561,7 +562,7 @@ impl HandshakeMessage {
                 panic!("TODO: Unknown Handshake Type {}", t);
             }
         };
-        try!(handshake_mark.check(src));
+        try!(src_hs.check_remaining());
         return Ok(ret);
     }
     fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
@@ -574,28 +575,27 @@ impl HandshakeMessage {
                 ref extensions,
             } => {
                 try!(dest.write_u8(CLIENT_HELLO));
-                let mut handshake_pos = PositionVec::<Length24>::new(dest);
-                let dest = handshake_pos.get();
+                let mut dest = PositionVec::<Length24>::new(dest);
                 try!(dest.write_all(&[0x03, 0x03]));
-                try!(random.write_to(dest));
-                try!(session_id.write_to(dest));
+                try!(random.write_to(dest.get()));
+                try!(session_id.write_to(dest.get()));
                 try!(dest.write_u16::<NetworkEndian>(
                     (cipher_suites.len() * 2) as u16));
                 for cipher_suite in cipher_suites.iter() {
-                    try!(cipher_suite.write_to(dest));
+                    try!(cipher_suite.write_to(dest.get()));
                 }
                 try!(dest.write_u8(compression_methods.len() as u8));
                 for compression_method in compression_methods.iter() {
-                    try!(compression_method.write_to(dest));
+                    try!(compression_method.write_to(dest.get()));
                 }
                 if extensions.len() > 0 {
-                    let mut extensions_pos
-                        = PositionVec::<Length16>::new(dest);
-                    let dest = extensions_pos.get();
+                    let mut dest = PositionVec::<Length16>::new(dest.get());
                     for extension in extensions {
-                        try!(extension.write_to(dest));
+                        try!(extension.write_to(dest.get()));
                     }
+                    dest.finalize();
                 }
+                dest.finalize();
             }
             &HandshakeMessage::ServerHello {
                 ref server_version,
@@ -641,7 +641,7 @@ impl TLSRandom {
     fn random_bytes<'a>(& 'a self) -> & 'a [u8] {
         return &self.bytes[4..32];
     }
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let mut ret = TLSRandom {
             bytes: [0; 32],
         };
@@ -661,7 +661,7 @@ impl SessionID {
             bytes: [0; 32],
         };
     }
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let length = try!(src.read_u8()) as usize;
         let mut ret = SessionID {
             length: length,
@@ -694,7 +694,7 @@ impl CipherSuite {
             io::Error::new(io::ErrorKind::InvalidData,
                            "Invalid CipherSuite"));
     }
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let id = try!(src.read_u16::<NetworkEndian>());
         let ret = try!(Self::parse(id));
         return Ok(ret);
@@ -719,7 +719,7 @@ impl CompressionMethod {
     fn id(self) -> u8 {
         return self as u8;
     }
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let id = try!(src.read_u8());
         let ret = try!(Self::from_id(id).ok_or(
             io::Error::new(io::ErrorKind::InvalidData,
@@ -733,19 +733,21 @@ impl CompressionMethod {
 }
 
 impl HelloExtension {
-    fn read_from<R:Read+Seek>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let extension_type = try!(src.read_u16::<NetworkEndian>());
-        let extension_mark = try!(LengthMarkR16::new(src));
+        let mut src_ext = Cursor::new(try!(src.read_buf_u16sized(0, 65535)));
         let ret : HelloExtension;
         match extension_type {
             EXTENSION_SERVER_NAME => {
                 let mut server_names = Vec::new();
-                if try!(extension_mark.is_remaining(src)) {
-                    let server_name_list_mark = try!(LengthMarkR16::new(src));
-                    while try!(server_name_list_mark.is_remaining(src)) {
-                        server_names.push(try!(ServerName::read_from(src)));
+                if src_ext.is_remaining() {
+                    let mut src_sn =
+                        Cursor::new(try!(src_ext.read_buf_u16sized(1, 65535)));
+                    while src_sn.is_remaining() {
+                        server_names.push(
+                            try!(ServerName::read_from(&mut src_sn)));
                     }
-                    try!(server_name_list_mark.check(src));
+                    src_sn.check_remaining();
                 }
                 ret = HelloExtension::ServerName(server_names);
             },
@@ -754,21 +756,22 @@ impl HelloExtension {
                 panic!("Unknown extension type");
             }
         };
-        try!(extension_mark.check(src));
+        try!(src_ext.check_remaining());
         return Ok(ret);
     }
     fn write_to(&self, dest: &mut Vec<u8>) -> io::Result<()> {
         match self {
             &HelloExtension::ServerName(ref server_names) => {
                 try!(dest.write_u16::<NetworkEndian>(EXTENSION_SERVER_NAME));
-                let mut extension_pos = PositionVec::<Length16>::new(dest);
-                let dest = extension_pos.get();
-                let mut server_name_list_pos
-                    = PositionVec::<Length16>::new(dest);
-                let dest = server_name_list_pos.get();
-                for server_name in server_names {
-                    try!(server_name.write_to(dest));
+                let mut dest = PositionVec::<Length16>::new(dest);
+                {
+                    let mut dest = PositionVec::<Length16>::new(dest.get());
+                    for server_name in server_names {
+                        try!(server_name.write_to(dest.get()));
+                    }
+                    dest.finalize();
                 }
+                dest.finalize();
             }
         }
         return Ok(());
@@ -776,7 +779,7 @@ impl HelloExtension {
 }
 
 impl ServerName {
-    fn read_from<R:Read>(src: &mut R) -> io::Result<Self> {
+    fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let name_type = try!(src.read_u8());
         let ret : ServerName;
         match name_type {
