@@ -6,12 +6,11 @@
 mod ciphersuites;
 
 use std::cmp;
-use std::io::{self,Read,Write,Seek,Cursor};
+use std::io::{self,Read,Write,Cursor};
 use std::str;
 use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
 use time;
 use rand;
-use misc;
 use misc::{PositionVec, Length16, Length24, OnMemoryRead};
 use self::ciphersuites::CipherSuite;
 
@@ -216,11 +215,11 @@ impl<S: Read + Write> TLSStream<S> {
             // println!("{:?}", &message);
             match message {
                 HandshakeMessage::ClientHello {
-                    random,
-                    session_id,
-                    cipher_suites,
-                    compression_methods,
-                    extensions,
+                    random: _,
+                    session_id: _,
+                    cipher_suites: _,
+                    compression_methods: _,
+                    extensions: _,
                 } => {
                     // TODO
                     panic!("TODO: ClienHello");
@@ -228,10 +227,10 @@ impl<S: Read + Write> TLSStream<S> {
                 HandshakeMessage::ServerHello {
                     server_version,
                     random,
-                    session_id,
+                    session_id: _,
                     cipher_suite,
                     compression_method,
-                    extensions,
+                    extensions: _,
                 } => {
                     // TODO
                     assert_eq!(server_version, 0x0303);
@@ -245,10 +244,10 @@ impl<S: Read + Write> TLSStream<S> {
                 },
                 HandshakeMessage::Certificate(certificate_list) => {
                     // TODO
-                    // println!("certificates:");
-                    // for certificate in certificate_list.iter() {
-                    //     println!("{:?}", certificate);
-                    // }
+                    println!("certificates:");
+                    for certificate in certificate_list.iter() {
+                        println!("{:?}", certificate);
+                    }
                 },
             };
         }
@@ -264,12 +263,12 @@ const CLIENT_HELLO : u8 = 0x01;
 const SERVER_HELLO : u8 = 0x02;
 const CERTIFICATE : u8 = 0x0B;
 const EXTENSION_SERVER_NAME : u16 = 0;
-const EXTENSION_MAX_FRAGMENT_LENGTH : u16 = 1;
-const EXTENSION_CLIENT_CERTIFICATE_URL : u16 = 2;
-const EXTENSION_TRUSTED_CA_KEYS : u16 = 3;
-const EXTENSION_TRUNCATED_HMAC : u16 = 4;
-const EXTENSION_STATUS_REQUEST : u16 = 5;
-const EXTENSION_SIGNATURE_ALGORITHMS : u16 = 13;
+// const EXTENSION_MAX_FRAGMENT_LENGTH : u16 = 1;
+// const EXTENSION_CLIENT_CERTIFICATE_URL : u16 = 2;
+// const EXTENSION_TRUSTED_CA_KEYS : u16 = 3;
+// const EXTENSION_TRUNCATED_HMAC : u16 = 4;
+// const EXTENSION_STATUS_REQUEST : u16 = 5;
+// const EXTENSION_SIGNATURE_ALGORITHMS : u16 = 13;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 enum ContentType {
@@ -286,11 +285,13 @@ struct ProtocolVersion {
     minor: u8,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 enum AlertLevel {
     Warning = 1, Fatal = 2,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 enum AlertDescription {
     CloseNotify = 0, UnexpectedMessage = 10, BadRecordMac = 20,
@@ -418,6 +419,7 @@ impl ContentType {
 }
 
 impl ProtocolVersion {
+    #[allow(dead_code)]
     fn parse(buf: &[u8]) -> io::Result<Self> {
         return Ok(ProtocolVersion {
             major: buf[0],
@@ -427,6 +429,7 @@ impl ProtocolVersion {
 }
 
 impl AlertLevel {
+    #[allow(dead_code)]
     fn from_id(id: u8) -> Option<AlertLevel> {
         let ret = match id {
             id if id == (AlertLevel::Warning as u8) => AlertLevel::Warning,
@@ -438,6 +441,7 @@ impl AlertLevel {
     fn id(self) -> u8 {
         return self as u8;
     }
+    #[allow(dead_code)]
     fn parse(id: u8) -> io::Result<AlertLevel> {
         return Self::from_id(id).ok_or(
             io::Error::new(io::ErrorKind::InvalidData, "Invalid AlertLevel"));
@@ -445,6 +449,7 @@ impl AlertLevel {
 }
 
 impl AlertDescription {
+    #[allow(dead_code)]
     fn from_id(id: u8) -> Option<AlertDescription> {
         for &ad in [
             AlertDescription::CloseNotify,
@@ -488,6 +493,7 @@ impl AlertDescription {
     fn id(self) -> u8 {
         return self as u8;
     }
+    #[allow(dead_code)]
     fn parse(id: u8) -> io::Result<AlertDescription> {
         return Self::from_id(id).ok_or(
             io::Error::new(io::ErrorKind::InvalidData,
@@ -496,6 +502,7 @@ impl AlertDescription {
 }
 
 impl Alert {
+    #[allow(dead_code)]
     fn read_from(src: &mut Cursor<&[u8]>) -> io::Result<Self> {
         let level_id = try!(src.read_u8());
         let level = try!(AlertLevel::parse(level_id));
@@ -534,11 +541,11 @@ impl HandshakeMessage {
                 if src_hs.is_remaining() {
                     let mut src_ext =
                         Cursor::new(try!(src_hs.read_buf_u16sized(0, 65535)));
-                    while src_hs.is_remaining() {
+                    while src_ext.is_remaining() {
                         extensions.push(
                             try!(HelloExtension::read_from(&mut src_ext)));
                     }
-                    src_ext.check_remaining();
+                    try!(src_ext.check_remaining());
                 }
                 ret = HandshakeMessage::ServerHello {
                     server_version: server_version,
@@ -559,7 +566,7 @@ impl HandshakeMessage {
                         .to_vec();
                     certificate_list.push(certificate);
                 }
-                src_certs.check_remaining();
+                try!(src_certs.check_remaining());
                 ret = HandshakeMessage::Certificate(certificate_list);
             },
             t => {
@@ -603,17 +610,17 @@ impl HandshakeMessage {
                 dest.finalize();
             }
             &HandshakeMessage::ServerHello {
-                ref server_version,
-                ref random,
-                ref session_id,
-                ref cipher_suite,
-                ref compression_method,
-                ref extensions,
+                server_version: _,
+                random: _,
+                session_id: _,
+                cipher_suite: _,
+                compression_method: _,
+                extensions: _,
             } => {
                 // TODO
                 panic!("TODO: write_to for ServerHello");
             },
-            &HandshakeMessage::Certificate(ref certificate_list) => {
+            &HandshakeMessage::Certificate(_) => {
                 // TODO
                 panic!("TODO: write_to for Certificate");
             }
@@ -640,9 +647,11 @@ impl TLSRandom {
             bytes: [0; 32],
         };
     }
+    #[allow(dead_code)]
     fn time(&self) -> u32 {
         return NetworkEndian::read_u32(&self.bytes[0..4]);
     }
+    #[allow(dead_code)]
     fn random_bytes<'a>(& 'a self) -> & 'a [u8] {
         return &self.bytes[4..32];
     }
@@ -724,7 +733,7 @@ impl HelloExtension {
                         server_names.push(
                             try!(ServerName::read_from(&mut src_sn)));
                     }
-                    src_sn.check_remaining();
+                    try!(src_sn.check_remaining());
                 }
                 ret = HelloExtension::ServerName(server_names);
             },

@@ -3,9 +3,9 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
-use std::io::{self,Read,Write,Seek,Cursor};
+use std::io::{self,Read,Write,Cursor};
 use std::marker::PhantomData;
-use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, NetworkEndian};
+use byteorder::{ByteOrder, ReadBytesExt, NetworkEndian};
 
 pub trait LengthWriter {
     fn skip(vec: &mut Vec<u8>);
@@ -39,9 +39,7 @@ impl<'a, L:LengthWriter> PositionVec<'a, L> {
         return self.vec;
     }
     pub fn finalize(self) {
-        use std::mem;
         L::write(self.vec, self.position);
-        // mem::forget(self);
     }
 }
 
