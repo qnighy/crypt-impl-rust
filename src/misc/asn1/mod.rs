@@ -5,6 +5,8 @@
 
 pub mod ber;
 
+use std::ops::{Deref, DerefMut};
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum TagClass {
     Universal, Application, ContextSpecific, Private,
@@ -54,6 +56,11 @@ pub const TAG_SEQUENCE : Tag = Tag {
 pub const TAG_SET : Tag = Tag {
     tag_class: TagClass::Universal,
     tag_number: 17,
+};
+
+pub const TAG_PRINTABLESTRING : Tag = Tag {
+    tag_class: TagClass::Universal,
+    tag_number: 19,
 };
 
 impl Tag {
@@ -112,8 +119,30 @@ impl ObjectIdentifier {
     }
 }
 
-impl AsRef<[u64]> for ObjectIdentifier {
-    fn as_ref(&self) -> &[u64] {
+impl Deref for ObjectIdentifier {
+    type Target = [u64];
+    fn deref(&self) -> &Self::Target {
         return &self.ids;
+    }
+}
+
+impl DerefMut for ObjectIdentifier {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        return &mut self.ids;
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct PrintableString {
+    string: String,
+}
+
+impl PrintableString {
+}
+
+impl Deref for PrintableString {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        return &self.string;
     }
 }

@@ -3,7 +3,7 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
-use misc::asn1::{Tag,TagType,SetOf,ObjectIdentifier};
+use misc::asn1::{Tag,TagType,SetOf,ObjectIdentifier,PrintableString};
 use misc::asn1::ber::{BerMode,BerReader,BerResult,BerError,FromBer};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -109,25 +109,25 @@ impl FromBer for AlgorithmIdentifier {
     fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
         return parser.parse_sequence(|parser| {
             let oid = try!(parser.parse::<ObjectIdentifier>());
-            if oid.as_ref() == AID_RSA_ENCRYPTION {
+            if *oid == AID_RSA_ENCRYPTION {
                 try!(parser.parse::<()>());
                 return Ok(AlgorithmIdentifier::RsaEncryption);
-            } else if oid.as_ref() == AID_MD2_WITH_RSA_ENCRYPTION {
+            } else if *oid == AID_MD2_WITH_RSA_ENCRYPTION {
                 try!(parser.parse::<()>());
                 return Ok(AlgorithmIdentifier::Md2WithRsaEncryption);
-            } else if oid.as_ref() == AID_MD5_WITH_RSA_ENCRYPTION {
+            } else if *oid == AID_MD5_WITH_RSA_ENCRYPTION {
                 try!(parser.parse::<()>());
                 return Ok(AlgorithmIdentifier::Md5WithRsaEncryption);
-            } else if oid.as_ref() == AID_SHA1_WITH_RSA_ENCRYPTION {
+            } else if *oid == AID_SHA1_WITH_RSA_ENCRYPTION {
                 try!(parser.parse::<()>());
                 return Ok(AlgorithmIdentifier::Sha1WithRsaEncryption);
-            } else if oid.as_ref() == AID_SHA256_WITH_RSA_ENCRYPTION {
+            } else if *oid == AID_SHA256_WITH_RSA_ENCRYPTION {
                 try!(parser.parse::<()>());
                 return Ok(AlgorithmIdentifier::Sha256WithRsaEncryption);
-            } else if oid.as_ref() == AID_SHA384_WITH_RSA_ENCRYPTION {
+            } else if *oid == AID_SHA384_WITH_RSA_ENCRYPTION {
                 try!(parser.parse::<()>());
                 return Ok(AlgorithmIdentifier::Sha384WithRsaEncryption);
-            } else if oid.as_ref() == AID_SHA512_WITH_RSA_ENCRYPTION {
+            } else if *oid == AID_SHA512_WITH_RSA_ENCRYPTION {
                 try!(parser.parse::<()>());
                 return Ok(AlgorithmIdentifier::Sha512WithRsaEncryption);
             } else {
@@ -152,8 +152,8 @@ impl FromBer for NameAttribute {
         parser.parse_sequence(|parser| {
             let oid = try!(parser.parse::<ObjectIdentifier>());
             println!("oid = {:?}", oid);
-            if oid.as_ref() == ATTR_COUNTRY_NAME {
-                println!("hoge {:?}", parser.remaining_buffer());
+            if *oid == ATTR_COUNTRY_NAME {
+                let hoge = try!(parser.parse::<PrintableString>());
                 return Ok(NameAttribute::CountryName);
             } else {
                 return Err(BerError::Invalid);
