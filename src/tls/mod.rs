@@ -3,6 +3,7 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
+mod certificates;
 mod ciphersuites;
 
 use std::cmp;
@@ -13,6 +14,7 @@ use time;
 use rand;
 use misc::{PositionVec, Length16, Length24, OnMemoryRead};
 use self::ciphersuites::CipherSuite;
+use self::certificates::SignedCertificate;
 
 pub struct TLSStream<S : Read + Write> {
     inner: S,
@@ -247,6 +249,7 @@ impl<S: Read + Write> TLSStream<S> {
                     println!("certificates:");
                     for certificate in certificate_list.iter() {
                         println!("{:?}", certificate);
+                        println!("{:?}", SignedCertificate::from_buf(certificate));
                     }
                 },
             };

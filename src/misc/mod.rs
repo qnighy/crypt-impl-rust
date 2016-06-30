@@ -3,6 +3,8 @@
 // This software is released under the MIT License.
 // http://opensource.org/licenses/mit-license.php
 
+pub mod asn1;
+
 use std::io::{self,Read,Write,Cursor};
 use std::marker::PhantomData;
 use byteorder::{ByteOrder, ReadBytesExt, NetworkEndian};
