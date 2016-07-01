@@ -14,7 +14,7 @@ use time;
 use rand;
 use misc::{PositionVec, Length16, Length24, OnMemoryRead};
 use self::ciphersuites::CipherSuite;
-use self::certificates::SignedCertificate;
+use self::certificates::Certificate;
 
 pub struct TLSStream<S : Read + Write> {
     inner: S,
@@ -248,8 +248,8 @@ impl<S: Read + Write> TLSStream<S> {
                     // TODO
                     println!("certificates:");
                     for certificate in certificate_list.iter() {
-                        println!("{:?}", certificate);
-                        println!("{:?}", SignedCertificate::from_buf(certificate));
+                        // println!("{:?}", certificate);
+                        println!("{:?}", Certificate::from_buf(certificate));
                     }
                 },
             };

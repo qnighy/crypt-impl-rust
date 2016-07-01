@@ -28,6 +28,11 @@ pub const TAG_INTEGER : Tag = Tag {
     tag_number: 2,
 };
 
+pub const TAG_BITSTRING : Tag = Tag {
+    tag_class: TagClass::Universal,
+    tag_number: 3,
+};
+
 pub const TAG_OCTETSTRING : Tag = Tag {
     tag_class: TagClass::Universal,
     tag_number: 4,
@@ -63,6 +68,11 @@ pub const TAG_PRINTABLESTRING : Tag = Tag {
     tag_number: 19,
 };
 
+pub const TAG_UTCTIME : Tag = Tag {
+    tag_class: TagClass::Universal,
+    tag_number: 23,
+};
+
 impl Tag {
     pub fn application(tag_number: u64) -> Tag {
         return Tag {
@@ -87,6 +97,36 @@ impl Tag {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum TagType {
     Explicit, Implicit,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct BitString {
+    unused_bits: usize,
+    buf: Vec<u8>,
+}
+
+impl BitString {
+    pub fn new() -> Self {
+        return BitString {
+            unused_bits: 0,
+            buf: Vec::new(),
+        };
+    }
+    pub fn from_buf(unused_bits : usize, buf: Vec<u8>) -> Self {
+        return BitString {
+            unused_bits: unused_bits,
+            buf: buf,
+        };
+    }
+    pub fn push(&mut self, b: bool) {
+        if self.unused_bits == 0 {
+            self.buf.push(0);
+            self.unused_bits = 8;
+        }
+        let last = self.buf.last_mut().unwrap();
+        self.unused_bits -= 1;
+        *last = *last | ((b as u8) << self.unused_bits);
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -138,11 +178,41 @@ pub struct PrintableString {
 }
 
 impl PrintableString {
+    pub fn from_bytes(bytes: Vec<u8>) -> Option<Self> {
+        for &b in bytes.iter() {
+            let ok =
+                (b'0' <= b && b <= b'9') ||
+                (b'A' <= b && b <= b'Z') ||
+                (b'a' <= b && b <= b'z') ||
+                b == b' ' || b == b'\'' || b == b'(' || b == b')' ||
+                b == b'+' || b == b',' || b == b'-' || b == b'.' ||
+                b == b'/' || b == b':' || b == b'=' || b == b'?';
+            if !ok {
+                return None;
+            }
+        }
+        return Some(PrintableString {
+            string: String::from_utf8(bytes).unwrap(),
+        });
+    }
 }
 
 impl Deref for PrintableString {
     type Target = str;
     fn deref(&self) -> &Self::Target {
         return &self.string;
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct UtcTime {
+    bytes: Vec<u8>,
+}
+
+impl UtcTime {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        return UtcTime {
+            bytes: bytes,
+        };
     }
 }

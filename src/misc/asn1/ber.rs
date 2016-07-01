@@ -13,17 +13,10 @@ use misc::asn1::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum BerError {
-    TagMismatch, Eof, Extra, IntegerOverflow, StackOverflow, Invalid,
+    Eof, Extra, IntegerOverflow, StackOverflow, Invalid,
 }
 
 pub type BerResult<T> = Result<T, BerError>;
-
-fn wrap_tag_mismatch<T>(r: BerResult<T>) -> BerResult<T> {
-    match r {
-        Err(BerError::TagMismatch) => Err(BerError::TagMismatch),
-        r => r,
-    }
-}
 
 impl Display for BerError {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -35,7 +28,6 @@ impl Display for BerError {
 impl Error for BerError {
     fn description(&self) -> &str {
         match *self {
-            BerError::TagMismatch => "Tag mismatch",
             BerError::Eof => "End of file",
             BerError::Extra => "Extra data in file",
             BerError::IntegerOverflow => "Integer overflow",
@@ -185,14 +177,14 @@ impl<'a> BerReader<'a> {
                 let (tag2, pc2) = try!(self.parse_identifier());
                 if tag2 != tag {
                     self.tag_state = TagState::Cached(tag2, pc2);
-                    return Err(BerError::TagMismatch);
+                    return Err(BerError::Invalid);
                 }
                 pc = pc2;
                 length_spec = try!(self.parse_length());
             },
             TagState::Cached(tag2, pc2) => {
                 if tag2 != tag {
-                    return Err(BerError::TagMismatch);
+                    return Err(BerError::Invalid);
                 }
                 pc = pc2;
                 length_spec = try!(self.parse_length());
@@ -229,7 +221,7 @@ impl<'a> BerReader<'a> {
             },
         };
         self.depth += 1;
-        let result = try!(wrap_tag_mismatch(fun(self, pc)));
+        let result = try!(fun(self, pc));
         self.depth -= 1;
         match length_spec {
             Some(_) => {
@@ -244,25 +236,40 @@ impl<'a> BerReader<'a> {
     }
     pub fn parse_optional<T, F>(&mut self, mut fun: F) -> BerResult<Option<T>>
             where F: FnMut(&mut Self) -> BerResult<T> {
+        if self.pos == self.buf.len() {
+            return Ok(None);
+        }
+        match self.tag_state {
+            TagState::None => {
+                let (tag, pc) = try!(self.parse_identifier());
+                self.tag_state = TagState::Cached(tag, pc);
+            },
+            TagState::Cached(_, _) => {},
+            TagState::Implicit(_, _) => {},
+        };
+        let old_pos = self.pos;
         match fun(self) {
             Ok(result) => Ok(Some(result)),
-            Err(BerError::TagMismatch) => Ok(None),
-            Err(e) => Err(e),
+            Err(e) =>
+                if old_pos == self.pos {
+                    Ok(None)
+                } else {
+                    Err(e)
+                },
         }
     }
     pub fn parse_default<T, F>(&mut self, default: T, mut fun: F)
             -> BerResult<T>
             where F: FnMut(&mut Self) -> BerResult<T>, T: Eq {
-        match fun(self) {
-            Ok(result) => {
+        match try!(self.parse_optional(fun)) {
+            Some(result) => {
                 if (self.mode == BerMode::Der || self.mode == BerMode::Cer) &&
                         result == default {
                     return Err(BerError::Invalid);
                 }
-                Ok(result)
-            }
-            Err(BerError::TagMismatch) => Ok(default),
-            Err(e) => Err(e),
+                return Ok(result);
+            },
+            None => Ok(default),
         }
     }
     pub fn parse_with_buffer<T, F>(&mut self, mut fun: F)
@@ -289,7 +296,7 @@ impl<'a> BerReader<'a> {
             -> BerResult<T>
             where F: FnMut(&mut Self) -> BerResult<T> {
         let mut parser = Self::new(buf, mode);
-        let result = try!(wrap_tag_mismatch(fun(&mut parser)));
+        let result = try!(fun(&mut parser));
         try!(parser.end_of_buf());
         return Ok(result);
     }
@@ -299,7 +306,7 @@ impl<'a> BerReader<'a> {
             if pc != PC::Constructed {
                 return Err(BerError::Invalid);
             }
-            return wrap_tag_mismatch(fun(parser));
+            return fun(parser);
         })
     }
     pub fn parse_set<T, F>(&mut self, mut fun: F) -> BerResult<T>
@@ -308,7 +315,26 @@ impl<'a> BerReader<'a> {
             if pc != PC::Constructed {
                 return Err(BerError::Invalid);
             }
-            return wrap_tag_mismatch(fun(parser));
+            return fun(parser);
+        })
+    }
+    fn parse_bitstring(&mut self) -> BerResult<BitString> {
+        self.parse_general(TAG_BITSTRING, TagType::Explicit, |parser, pc| {
+            if pc == PC::Constructed {
+                // TODO: implement recursive encoding
+                return Err(BerError::Invalid);
+            } else {
+                // TODO: Canonicity check in DER
+                let buf = parser.fetch_remaining_buffer();
+                if buf.len() == 0 {
+                    return Ok(BitString::from_buf(0, Vec::new()));
+                }
+                let remain = buf[0] as usize;
+                return Ok(BitString::from_buf(
+                    remain % 8,
+                    buf[1..buf.len()-remain/8].to_vec()
+                ));
+            }
         })
     }
     fn parse_octetstring_impl(&mut self, vec: &mut Vec<u8>, depth: usize)
@@ -378,15 +404,15 @@ impl<T> FromBer for Vec<T> where T: Sized + Eq + Hash + FromBer {
         parser.parse_sequence(|parser| {
             let mut ret = Vec::new();
             loop {
-                match T::from_ber(parser) {
-                    Ok(result) => {
+                let result = try!(parser.parse_optional(|parser| {
+                    T::from_ber(parser)
+                }));
+                match result {
+                    Some(result) => {
                         ret.push(result);
                     },
-                    Err(BerError::TagMismatch) => {
+                    None => {
                         break;
-                    },
-                    Err(e) => {
-                        return Err(e);
                     }
                 };
             }
@@ -402,8 +428,18 @@ impl<T> FromBer for SetOf<T> where T: Sized + Eq + Hash + FromBer {
             let mut old_buf : Option<&'a [u8]> = None;
             loop {
                 let (result, buf) = try!(parser.parse_with_buffer(|parser| {
-                    T::from_ber(parser)
+                    parser.parse_optional(|parser| {
+                        T::from_ber(parser)
+                    })
                 }));
+                match result {
+                    Some(result) => {
+                        ret.vec.push(result);
+                    },
+                    None => {
+                        break;
+                    },
+                };
                 if parser.mode == BerMode::Der || parser.mode == BerMode::Cer {
                     match old_buf {
                         Some(old_buf) => {
@@ -423,17 +459,6 @@ impl<T> FromBer for SetOf<T> where T: Sized + Eq + Hash + FromBer {
                     }
                 }
                 old_buf = Some(buf);
-                match T::from_ber(parser) {
-                    Ok(result) => {
-                        ret.vec.push(result);
-                    },
-                    Err(BerError::TagMismatch) => {
-                        break;
-                    },
-                    Err(e) => {
-                        return Err(e);
-                    }
-                };
             }
             return Ok(ret);
         })
@@ -501,6 +526,38 @@ enum PC {
 
 const PCS : [PC; 2] = [PC::Primitive, PC::Constructed];
 
+impl FromBer for bool {
+    fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
+        parser.parse_general(TAG_BOOLEAN, TagType::Explicit, |parser, pc| {
+            if pc != PC::Primitive {
+                return Err(BerError::Invalid);
+            }
+            let buf = parser.fetch_remaining_buffer();
+            if buf.len() != 1 {
+                return Err(BerError::Invalid);
+            }
+            let b = buf[0];
+            if (parser.mode == BerMode::Der || parser.mode == BerMode::Cer) &&
+                    b != 0 && b != 255 {
+                return Err(BerError::Invalid);
+            }
+            return Ok(b != 0);
+        })
+    }
+}
+
+impl FromBer for BitString {
+    fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
+        parser.parse_bitstring()
+    }
+}
+
+impl FromBer for Vec<u8> {
+    fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
+        parser.parse_octetstring()
+    }
+}
+
 impl FromBer for ObjectIdentifier {
     fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
         parser.parse_general(TAG_OID, TagType::Explicit, |parser, pc| {
@@ -547,8 +604,18 @@ impl FromBer for PrintableString {
     fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
         parser.parse_tagged(TAG_PRINTABLESTRING, TagType::Implicit, |parser| {
             let octets = try!(parser.parse_octetstring());
-            println!("bar {:?}", octets);
-            return Err(BerError::Invalid);
+            return PrintableString::from_bytes(octets)
+                .ok_or(BerError::Invalid);
+        })
+    }
+}
+
+impl FromBer for UtcTime {
+    fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
+        parser.parse_tagged(TAG_UTCTIME, TagType::Implicit, |parser| {
+            let octets = try!(parser.parse_octetstring());
+            // TODO: format check
+            return Ok(UtcTime::new(octets));
         })
     }
 }
