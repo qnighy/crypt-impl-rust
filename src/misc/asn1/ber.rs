@@ -9,6 +9,8 @@ use std::fmt::{self,Display};
 use std::hash::Hash;
 use std::io;
 
+use num::bigint::{BigInt,BigUint,ToBigUint};
+
 use misc::asn1::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -397,6 +399,12 @@ impl<'a> BerReader<'a> {
 
 pub trait FromBer: Sized + Eq + Hash {
     fn from_ber<'a>(parser: &mut BerReader<'a>) -> BerResult<Self>;
+
+    fn from_buf(src: &[u8], mode: BerMode) -> BerResult<Self> {
+        return BerReader::from_buf(src, mode, |parser| {
+            return Self::from_ber(parser);
+        });
+    }
 }
 
 impl<T> FromBer for Vec<T> where T: Sized + Eq + Hash + FromBer {
@@ -489,6 +497,40 @@ impl FromBer for i64 {
             }
             return Ok(x);
         })
+    }
+}
+
+impl FromBer for BigInt {
+    fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
+        parser.parse_general(TAG_INTEGER, TagType::Explicit, |parser, pc| {
+            if pc != PC::Primitive {
+                return Err(BerError::Invalid);
+            }
+            let buf = parser.fetch_remaining_buffer();
+            if buf.len() == 0 {
+                return Err(BerError::Invalid);
+            } else if buf.len() == 1 {
+                return Ok(BigInt::from(buf[0] as i8));
+            }
+            let mut x = (BigInt::from(buf[0] as i8) << 8) +
+                BigInt::from(buf[1] as i64);
+            if BigInt::from(-128) <= x && x < BigInt::from(128) {
+                return Err(BerError::Invalid);
+            }
+            for &b in buf[2..].iter() {
+                x = (x << 8) + BigInt::from(b);
+            }
+            return Ok(x);
+        })
+    }
+}
+
+impl FromBer for BigUint {
+    fn from_ber(parser: &mut BerReader) -> BerResult<Self> {
+        match try!(parser.parse::<BigInt>()).to_biguint() {
+            Some(result) => Ok(result),
+            None => Err(BerError::Invalid),
+        }
     }
 }
 

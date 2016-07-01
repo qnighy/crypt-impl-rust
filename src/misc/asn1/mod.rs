@@ -101,8 +101,8 @@ pub enum TagType {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct BitString {
-    unused_bits: usize,
-    buf: Vec<u8>,
+    pub unused_bits: usize,
+    pub buf: Vec<u8>,
 }
 
 impl BitString {

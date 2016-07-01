@@ -6,6 +6,7 @@
 extern crate byteorder;
 extern crate time;
 extern crate rand;
+extern crate num;
 
 mod misc;
 pub mod md5;

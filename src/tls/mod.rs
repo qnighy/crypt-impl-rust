@@ -246,10 +246,17 @@ impl<S: Read + Write> TLSStream<S> {
                 },
                 HandshakeMessage::Certificate(certificate_list) => {
                     // TODO
-                    println!("certificates:");
+                    use misc::asn1::ber::{BerMode,FromBer};
+                    let mut parsed_certificate_list = Vec::new();
                     for certificate in certificate_list.iter() {
-                        // println!("{:?}", certificate);
-                        println!("{:?}", Certificate::from_buf(certificate));
+                        parsed_certificate_list.push(try!(
+                            Certificate::from_buf(certificate, BerMode::Der)));
+                    }
+                    println!("{:?}", parsed_certificate_list);
+                    for i in 0..parsed_certificate_list.len()-1 {
+                        println!("{:?}",
+                             parsed_certificate_list[i].verify(
+                                 parsed_certificate_list[i+1].to_be_signed()));
                     }
                 },
             };
